@@ -1,0 +1,95 @@
+{{define "appearance"}}{{$cur := .Theme}}{{$cmp := .Page.Compare}}
+{{template "system_nav" .}}
+<header class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Appearance</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">Pick the look of the portal. The choice applies at once, is remembered in this browser (a cookie, so every page renders in it), and never changes the kit's files.</p>
+  </div>
+  <div class="flex items-center gap-2 text-sm"><span class="text-base-content/60">Current</span><span class="badge badge-primary gap-1">{{iconc "palette" "size-3"}}{{$cur}}</span></div>
+</header>
+
+<section class="card card-border mb-8 min-w-0 bg-base-100" aria-labelledby="compare-title">
+  <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 px-4 py-3">
+    <h2 id="compare-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "file-diff" "size-4 text-primary"}}Compare <span class="font-mono text-sm font-normal">{{$cur}}</span> with <span class="font-mono text-sm font-normal">{{$cmp}}</span></h2>
+    <form method="get" action="/system/appearance" class="flex items-center gap-2">
+      <label class="text-sm text-base-content/70" for="compare-with">Compare with</label>
+      <select id="compare-with" name="compare" class="select select-sm w-48 touch:min-h-11" data-autosubmit>
+        {{range .Themes}}<option value="{{.Name}}"{{if eq .Name $cmp}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </form>
+  </div>
+  <div class="p-4">
+    <figure class="diff aspect-[4/3] rounded-box border border-base-content/10 sm:aspect-[16/7]" tabindex="0" aria-label="Drag the divider to compare the two themes">
+      <div class="diff-item-1" role="img" aria-label="Portal preview in the {{$cur}} theme" tabindex="0"><div data-theme="{{$cur}}">{{template "theme_preview" $cur}}</div></div>
+      <div class="diff-item-2" role="img" aria-label="Portal preview in the {{$cmp}} theme"><div data-theme="{{$cmp}}">{{template "theme_preview" $cmp}}</div></div>
+      <div class="diff-resizer"></div>
+    </figure>
+    <p class="mt-2 text-xs text-base-content/60">Drag the handle on the divider, or focus the preview and use the keyboard. Left: your current theme. Right: the one you compare it with.</p>
+  </div>
+</section>
+
+<section aria-labelledby="gallery-title">
+  <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+    <h2 id="gallery-title" class="flex items-center gap-2 font-display text-lg font-semibold">{{iconc "swatch-book" "size-5 text-primary"}}Theme gallery</h2>
+    <p class="text-sm text-base-content/60">{{len .Themes}} themes · select one to use it</p>
+  </div>
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+    {{range .Themes}}
+    <label data-theme="{{.Name}}" class="card card-border cursor-pointer overflow-hidden bg-base-100 text-base-content has-checked:ring-2 has-checked:ring-primary has-checked:ring-offset-2 has-checked:ring-offset-base-200 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary">
+      <input type="radio" name="theme" value="{{.Name}}" class="theme-controller sr-only" aria-label="Use the {{.Label}} theme"{{if eq .Name $cur}} checked{{end}}>
+      <div class="grid h-12 grid-cols-6" aria-hidden="true">
+        <span class="bg-primary"></span><span class="bg-secondary"></span><span class="bg-accent"></span><span class="bg-neutral"></span><span class="bg-base-200"></span><span class="bg-base-300"></span>
+      </div>
+      <div class="card-body gap-3 p-4">
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-display font-semibold">{{.Label}}</span>
+          <span class="badge badge-sm badge-ghost gap-1">{{if .Dark}}{{iconc "moon" "size-3"}}dark{{else}}{{iconc "sun" "size-3"}}light{{end}}</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-1" aria-hidden="true">
+          <span class="btn btn-xs btn-primary text-xs">Run a cycle</span>
+          <span class="badge badge-sm badge-soft badge-success">integrated</span>
+          <span class="badge badge-sm badge-soft badge-warning">building</span>
+          <span class="badge badge-sm badge-soft badge-error">blocked</span>
+        </div>
+        <div class="flex items-center justify-between gap-2 text-xs">
+          <span class="font-mono text-base-content/60">{{.Name}}</span>
+          <a href="/system/appearance?compare={{.Name}}#compare-title" class="link link-hover inline-flex min-h-6 items-center text-base-content/70 touch:min-h-11 touch:min-w-11 touch:justify-center">Compare</a>
+        </div>
+      </div>
+    </label>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+{{/* A miniature portal page, drawn in whatever theme its parent sets. Takes the theme name. */}}
+{{define "theme_preview"}}
+<div class="flex h-full w-full bg-base-200 text-base-content">
+  <div class="hidden w-1/5 flex-col gap-2 bg-base-300 p-3 sm:flex">
+    <span class="mb-2 flex items-center gap-2 font-display text-sm font-bold"><span class="grid size-6 place-items-center bg-primary text-primary-content">{{iconc "git-merge" "size-3"}}</span>OpenSpec Kit</span>
+    <span class="rounded-field bg-base-100 px-2 py-1 text-xs font-medium">Dashboard</span>
+    <span class="px-2 py-1 text-xs text-base-content/70">Changes</span>
+    <span class="px-2 py-1 text-xs text-base-content/70">Backlog</span>
+    <span class="px-2 py-1 text-xs text-base-content/70">Executions</span>
+  </div>
+  <div class="flex min-w-0 flex-1 flex-col gap-3 p-4">
+    <div class="flex items-center justify-between gap-2">
+      <span class="font-display text-lg font-bold sm:text-2xl">Dashboard</span>
+      <span class="btn btn-xs btn-primary text-xs sm:btn-sm">Run a cycle</span>
+    </div>
+    <div class="grid grid-cols-5 gap-0.5 text-center">
+      <span class="bg-base-100 px-1 py-2"><b class="block font-display text-base tabular-nums sm:text-xl">12</b><span class="font-mono text-xs uppercase text-base-content/60">queued</span></span>
+      <span class="bg-base-100 px-1 py-2"><b class="block font-display text-base tabular-nums sm:text-xl">3</b><span class="font-mono text-xs uppercase text-base-content/60">proposals</span></span>
+      <span class="bg-primary px-1 py-2 text-primary-content"><b class="block font-display text-base tabular-nums sm:text-xl">2</b><span class="font-mono text-xs uppercase">building</span></span>
+      <span class="bg-base-100 px-1 py-2"><b class="block font-display text-base tabular-nums sm:text-xl">1</b><span class="font-mono text-xs uppercase text-base-content/60">ready</span></span>
+      <span class="bg-base-100 px-1 py-2"><b class="block font-display text-base tabular-nums sm:text-xl">48</b><span class="font-mono text-xs uppercase text-base-content/60">integrated</span></span>
+    </div>
+    <div class="flex flex-1 flex-col gap-1.5 rounded-box bg-base-100 p-3 text-xs">
+      <span class="flex items-center justify-between gap-2"><span class="font-mono">add-payment-retries</span><span class="badge badge-sm badge-soft badge-error">blocked</span></span>
+      <span class="flex items-center justify-between gap-2"><span class="font-mono">split-ledger-service</span><span class="badge badge-sm badge-soft badge-warning">building</span></span>
+      <span class="flex items-center justify-between gap-2"><span class="font-mono">fix-locale-on-linux</span><span class="badge badge-sm badge-soft badge-success">ready to merge</span></span>
+      <progress class="progress progress-primary mt-auto w-full" value="7" max="10" aria-label="7 of 10 tasks"></progress>
+    </div>
+  </div>
+</div>
+{{end}}

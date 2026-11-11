@@ -1,0 +1,97 @@
+{{/* Merge queue: what waits to be integrated and what the merger does with it. It draws .Page, the
+     struct its read returns (internal/portal/page_merge.go). */}}
+
+{{/* An attempt of the merger that ended, in one row of the table. dict: a (store.MergeAttempt), at */}}
+{{define "merge_attempt_row"}}{{$a := .a}}
+<tr class="align-top hover:bg-base-200/60">
+  <td class="min-w-56">{{template "change_link" $a.ChangeName}}</td>
+  <td><a class="link link-hover tabular-nums touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/changes/{{enc $a.ChangeName}}#merge-{{$a.ID}}" aria-label="Attempt {{$a.ID}}, in the story of {{$a.ChangeName}}">#{{$a.ID}}</a></td>
+  <td>
+    {{state "merge_attempts.result" $a.Result}}
+    {{with (word "merge_attempts.result" $a.Result).Means}}<p class="mt-1 max-w-xs text-xs text-base-content/70">{{.}}</p>{{end}}
+  </td>
+  {{/* An attempt that integrated the change has no reason to give; any other is expected to. */}}
+  <td class="min-w-48 max-w-md break-words text-sm">{{with $a.ResultReason}}{{template "clamped" .}}{{else}}{{if not (or (eq $a.Result "integrated") (eq $a.Result "already_integrated"))}}<span class="text-base-content/60">The merger gave none.</span>{{end}}{{end}}</td>
+  <td>{{with $a.IntegratedCommit}}<code class="font-mono text-xs">{{printf "%.10s" .}}</code>{{else}}<span class="text-base-content/60">none</span>{{end}}</td>
+  <td class="whitespace-nowrap text-sm">{{at $a.FinishedAt}}<p class="mt-0.5 text-xs text-base-content/60 tabular-nums">took {{took $a.StartedAt $a.FinishedAt .at}}</p></td>
+</tr>
+{{end}}
+
+{{define "merge"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Merge queue</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">What waits to be integrated, and what the merger does with it. A change enters the queue when its worker ends with every gate passed.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    {{if .Paused}}<p class="max-w-xs text-sm text-base-content/70">The kit is paused: the merger starts nothing until it is resumed.</p>
+    {{else}}<button class="btn btn-sm touch:min-h-11" data-post="/api/merger/runs" data-toast="Merger started">{{icon "git-merge"}}Run the merger</button>{{end}}
+    {{template "base_gates_btn"}}
+  </div>
+</header>
+
+{{if $p.First}}
+<div id="merge-now" data-live-region class="mb-6 flex flex-col gap-6">
+  <section class="card card-border bg-base-100" aria-labelledby="merge-current-title">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="merge-current-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "git-merge" "size-4 text-primary"}}The merger now</h2></div>
+    {{with $p.Current}}
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 p-4 text-sm">
+      <span class="inline-grid *:[grid-area:1/1]" aria-hidden="true"><span class="status status-info animate-ping"></span><span class="status status-info"></span></span>
+      {{template "change_link" .ChangeName}}
+      <span>{{(word "merge_attempts.state" .State).Text}}</span>
+      <span class="text-xs text-base-content/60">attempt #{{.ID}} · for <span class="tabular-nums">{{took .StartedAt "" $.ReadAt}}</span></span>
+    </div>
+    {{else}}<p class="p-4 text-sm text-base-content/70">The merger is idle: no attempt is in progress.</p>{{end}}
+  </section>
+
+  {{if $p.BrokenBases}}
+  <section aria-labelledby="merge-bases-title">
+    <h2 id="merge-bases-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "git-branch" "size-4 text-primary"}}Base branches that fail on their own<span class="badge badge-sm badge-ghost tabular-nums">{{len $p.BrokenBases}}</span></h2>
+    <ul class="list card card-border bg-base-100">{{range $p.BrokenBases}}{{template "broken_base_row" .}}{{end}}</ul>
+  </section>
+  {{end}}
+
+  <section aria-labelledby="merge-waiting-title">
+    <h2 id="merge-waiting-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "package-check" "size-4 text-primary"}}Waiting to be merged<span class="badge badge-sm badge-ghost tabular-nums">{{len $p.Waiting}}</span></h2>
+    <div class="card card-border min-w-0 bg-base-100">
+      {{if $p.Waiting}}
+      <ul class="list">
+        {{range $p.Waiting}}
+        <li class="list-row items-start gap-3 text-sm">
+          {{iconc "package-check" "mt-0.5 size-5 shrink-0 text-base-content/60"}}
+          <div class="flex min-w-0 flex-col gap-1.5">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {{template "change_link" .ChangeName}}
+              <span class="text-xs text-base-content/60">in the queue since {{at .EnqueuedAt}} · <code class="font-mono">{{printf "%.10s" .HeadSHA}}</code> on <span class="font-mono">{{.Branch}}</span></span>
+            </div>
+            <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"><span class="text-base-content/70">It touches</span>{{range .Capabilities}}<span class="badge badge-sm badge-ghost font-mono">{{.}}</span>{{else}}<span class="text-base-content/70">no capability on record</span>{{end}}</p>
+            {{with .Risk}}<p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"><span class="text-base-content/70">Its risk, by the evaluator:</span>{{state "evaluations.status" .Status}}{{if .Cached}}<span class="text-base-content/60">answered before, not asked again</span>{{end}}</p>{{end}}
+            {{if .Attempts}}
+            <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-content/80"><span>The merger tried it {{times .Attempts}}.</span>{{with .Last}}<span>The last one:</span>{{if .Result}}{{state "merge_attempts.result" .Result}}{{with .ResultReason}}<span class="break-words">{{.}}</span>{{end}}{{else}}{{badge "in progress" "info"}}{{end}}{{end}}</p>
+            {{else}}<p class="text-xs text-base-content/70">The merger has not tried it yet.</p>{{end}}
+            {{if .Pushes}}<p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"><span class="text-base-content/70">Already pushed:</span>{{range .Pushes}}<span class="font-mono">{{.RepoPath}} <span class="text-base-content/60">{{printf "%.8s" .PushedSHA}}</span></span>{{end}}</p>{{end}}
+          </div>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}{{template "empty" (dict "icon" "package-check" "title" "Nothing waits to be merged." "text" "A change appears here when its worker ends with every gate passed.")}}{{end}}
+    </div>
+  </section>
+</div>
+{{end}}
+
+<section aria-labelledby="merge-recent-title">
+  <h2 id="merge-recent-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "history" "size-4 text-primary"}}{{if $p.First}}The latest attempts{{else}}Earlier attempts{{end}}</h2>
+  <div id="merge-recent" data-live-region class="card card-border min-w-0 bg-base-100">
+    {{if $p.Recent}}
+    <div class="max-w-full overflow-x-auto">
+      <table class="table table-stack">
+        <thead><tr><th>Change</th><th>Attempt</th><th>Result</th><th>Reason</th><th>Commit</th><th>Ended</th></tr></thead>
+        <tbody>{{range $p.Recent}}{{template "merge_attempt_row" (dict "a" . "at" $.ReadAt)}}{{end}}</tbody>
+      </table>
+    </div>
+    {{else}}{{template "empty" (dict "icon" "history" "title" "No attempt of the merger has ended yet." "text" "Each attempt appears here with its result and the reason the merger gave.")}}{{end}}
+    {{template "older_newest" (dict "older" $p.Older "newest" $p.Newest)}}
+  </div>
+</section>
+{{end}}

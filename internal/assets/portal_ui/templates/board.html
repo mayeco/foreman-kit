@@ -1,0 +1,153 @@
+{{/* Board: the changes of the workspace as cards in seven lanes. It draws .Page, the struct its read
+     returns (internal/portal/page_board.go). A card is in the lane its state puts it in; a button
+     of a card runs one of the actions the portal already has, and dropping the card on a lane
+     presses the button that moves it there (js/40_board.js). */}}
+
+{{/* A button that moves a card. dict: m (boardMove), c (boardCard). Dropping the card on the lane
+     m.To presses it, so what it asks before acting is asked for a drop too. */}}
+{{define "board_move"}}{{$m := .m}}{{$c := .c}}
+{{if eq $m.Action "approve"}}<button class="btn btn-xs text-xs touch:btn-sm touch:min-h-11" data-move-to="{{$m.To}}" data-post="{{$m.Href}}" data-refresh="regions" data-toast="Approved {{$c.Name}}" title="A cycle queues it while the queue has room: until then it stays in Proposals">{{icon "check"}}Approve</button>
+{{else if eq $m.Action "reject"}}<button class="btn btn-xs text-xs touch:btn-sm touch:min-h-11" data-move-to="{{$m.To}}" data-post="{{$m.Href}}" data-refresh="regions" data-confirm="Reject {{$c.Name}}? {{if eq $c.State "approved"}}It was approved, and it is not queued.{{else}}It is not proposed again.{{end}}" data-confirm-title="Reject this proposal?" data-confirm-ok="Reject" data-danger="1" data-toast="Rejected {{$c.Name}}">{{icon "x"}}Reject</button>
+{{else if eq $m.Action "unblock"}}<button class="btn btn-xs text-xs touch:btn-sm touch:min-h-11" data-move-to="{{$m.To}}" data-post="{{$m.Href}}" data-body="{{$m.Body}}" data-refresh="regions" data-toast="Unblocked {{$c.Name}}" title="Its block is lifted and its retries are kept: the dispatcher takes it again">{{icon "lock-open"}}Unblock</button>
+{{else if eq $m.Action "approve_risk"}}<button class="btn btn-xs text-xs touch:btn-sm touch:min-h-11" data-move-to="{{$m.To}}" data-post="{{$m.Href}}" data-refresh="regions" data-confirm="Accept the risk of {{$c.Name}}? Its block is lifted, and the change merges although a gate flagged it." data-confirm-title="Accept this risk?" data-confirm-ok="Approve risk" data-toast="Approved the risk of {{$c.Name}}">{{icon "shield-check"}}Approve risk</button>
+{{else if eq $m.Action "reclaim"}}<button class="btn btn-xs text-xs touch:btn-sm touch:min-h-11" data-move-to="{{$m.To}}" data-post="{{$m.Href}}" data-refresh="regions" data-toast="Gave back the lease of {{$c.Name}}" title="Its worker is gone: with its lease given back, the dispatcher takes the change again">{{icon "rotate-ccw"}}Give back its lease</button>
+{{else if eq $m.Action "abandon"}}<button class="btn btn-xs text-xs touch:btn-sm touch:min-h-11" data-move-to="{{$m.To}}" data-post="{{$m.Href}}" data-refresh="regions" data-confirm="Abandon {{$c.Name}}? It leaves the backlog and the merge queue and is discarded: the kit builds and merges nothing more for it, and its name is not queued again. Its worktree and its branch stay where they are." data-confirm-title="Abandon this change?" data-confirm-ok="Abandon" data-danger="1" data-toast="Abandoned {{$c.Name}}">{{icon "trash-2"}}Abandon</button>
+{{end}}
+{{end}}
+
+{{/* The tasks of a change: how many are done, as a bar, and each one with its box. dict: t (Tasks),
+     c (boardCard). The list is open while a worker builds the change, and a person opens or closes
+     it on any card: the refresh of the page leaves it as the person left it. A plan
+     writes a task as a paragraph: a card shows how each begins, and leads to the file. */}}
+{{define "board_tasks"}}{{$t := .t}}{{$c := .c}}
+<details id="tasks-{{$c.Name}}" class="group/tasks"{{if eq $c.State "building"}} open{{end}}>
+  <summary class="flex cursor-pointer list-none items-center gap-2 text-xs touch:min-h-11 [&::-webkit-details-marker]:hidden">
+    <progress class="progress h-1.5 min-w-0 flex-1 {{if eq $t.Done $t.Total}} progress-success {{else}} progress-primary {{end}}" value="{{$t.Done}}" max="{{$t.Total}}" aria-label="Tasks of {{$c.Name}} that are done"></progress>
+    <span class="whitespace-nowrap tabular-nums text-base-content/80">{{$t.Done}} of {{count $t.Total "task" "tasks"}}</span>
+    {{iconc "chevron-right" "size-3.5 shrink-0 transition-transform group-open/tasks:rotate-90"}}
+  </summary>
+  <ul class="mt-1.5 flex flex-col gap-1 text-xs">
+    {{$section := ""}}
+    {{range $t.Items}}
+    {{if ne .Section $section}}{{$section = .Section}}{{with .Section}}<li class="pt-1 font-medium text-base-content/80">{{.}}</li>{{end}}{{end}}
+    <li class="flex items-start gap-1.5">
+      {{if .Done}}{{iconc "circle-check" "mt-0.5 size-3.5 shrink-0 text-success"}}<span class="line-clamp-2 min-w-0 break-words text-base-content/60" title="{{.Text}}"><span class="sr-only">Done: </span>{{codeSpans .Text}}</span>
+      {{else}}{{iconc "circle" "mt-0.5 size-3.5 shrink-0 text-base-content/60"}}<span class="line-clamp-2 min-w-0 break-words" title="{{.Text}}"><span class="sr-only">To do: </span>{{codeSpans .Text}}</span>{{end}}
+    </li>
+    {{end}}
+    <li class="pt-1"><a class="link touch:inline-flex touch:min-h-11 touch:items-center" draggable="false" href="/changes/{{enc $c.Name}}/files/tasks.md">The tasks of {{$c.Name}}, in full</a></li>
+  </ul>
+</details>
+{{end}}
+
+{{/* A card. dict: c (boardCard), at (when the page was read) */}}
+{{define "board_card"}}{{$c := .c}}
+<li class="card card-border bg-base-100 text-sm{{if $c.Urgent}} border-error{{end}}{{if $c.Moves}} cursor-grab active:cursor-grabbing{{end}}" data-card="{{$c.Name}}" data-kind="{{$c.Kind}}"{{if $c.Moves}} draggable="true"{{end}}>
+  <div class="flex flex-col gap-1.5 p-3">
+    <div class="flex flex-wrap items-start gap-x-2 gap-y-1">
+      <a class="link link-hover min-w-0 flex-auto break-words font-mono font-medium touch:inline-flex touch:min-h-11 touch:items-center" draggable="false" href="{{$c.Href}}">{{$c.Name}}</a>
+      {{if eq $c.Priority "critical"}}<span class="badge badge-sm badge-error">critical</span>{{else if eq $c.Priority "high"}}<span class="badge badge-sm badge-warning">high</span>{{end}}
+    </div>
+
+    {{if eq $c.Kind "proposal"}}
+    <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">{{state "proposals.status" $c.State}}<span class="text-base-content/60">a proposal of {{at $c.Proposal.ProposedAt}}</span></p>
+    {{with $c.Description}}<p class="line-clamp-2 text-xs text-base-content/80">{{.}}</p>{{end}}
+    {{if eq $c.State "approved"}}<p class="text-xs text-base-content/70">A cycle queues it while the queue has room.</p>{{end}}
+    {{with $c.Review}}{{if eq .By "evaluator"}}<p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"><span class="text-base-content/70">The evaluator:</span>{{state "evaluations.status" .Status}}</p>{{end}}{{end}}
+
+    {{else if $c.Block}}
+    <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"><span class="badge badge-sm badge-error">{{label $c.Block.Reason}}</span>{{if $c.Block.Quarantine.ApprovedRisk}}{{badge "risk accepted" "success"}}{{end}}</p>
+    <p class="text-xs text-base-content/70">Blocked {{at $c.Block.BlockedAt}}. The kit retried it {{times $c.Block.Quarantine.Retries}} and rebuilt it {{times $c.Block.Quarantine.Rebuilds}} before.</p>
+
+    {{else if $c.Run}}
+    <p class="text-xs">{{with $c.RunName}}<b>{{.}}</b>{{else}}<span class="text-base-content/70">between two steps of its worker</span>{{end}}{{with $c.RunEngines}} <span class="text-base-content/60">on</span> <span class="font-mono">{{join . ", "}}</span>{{end}} <span class="text-base-content/60 tabular-nums">· for {{took $c.Run.StartedAt "" $.at}}</span></p>
+    {{with $c.Idle}}<p class="flex items-center gap-1.5 text-xs">{{iconc "hourglass" "size-3.5 shrink-0 text-warning"}}<span>No activity for <span class="tabular-nums">{{seconds .IdleSeconds}}</span>: it is stopped at <span class="tabular-nums">{{seconds .LimitSeconds}}</span>.</span></p>{{end}}
+    {{if $c.Run.Lost}}<p class="flex items-center gap-1.5 text-xs">{{iconc "octagon-alert" "size-3.5 shrink-0 text-error"}}<span>Its worker is gone: nothing holds its lease.</span></p>{{end}}
+
+    {{else if $c.Merge}}
+    <p class="text-xs"><b>{{(word "merge_attempts.state" $c.Merge.State).Text}}</b> <span class="text-base-content/60 tabular-nums">· attempt #{{$c.Merge.ID}}, for {{took $c.Merge.StartedAt "" $.at}}</span></p>
+
+    {{else if $c.Manifest}}
+    <p class="text-xs text-base-content/70">It waits for the merger since {{at $c.Manifest.EnqueuedAt}}.{{if $c.Manifest.Attempts}} The merger tried it {{times $c.Manifest.Attempts}}.{{end}}</p>
+    {{with $c.Manifest.Last}}{{if .Result}}<p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"><span class="text-base-content/70">The last one:</span>{{state "merge_attempts.result" .Result}}</p>{{end}}{{end}}
+
+    {{else if eq $c.State "integrated"}}
+    <p class="text-xs text-base-content/70">Integrated {{at $c.Change.IntegratedAt}}{{with $c.Change.IntegratedCommit}} · commit <code class="font-mono">{{printf "%.10s" .}}</code>{{end}}</p>
+
+    {{else if or (eq $c.State "discarded") (eq $c.State "unknown")}}
+    <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">{{state "changes.state" $c.State}}<span class="text-base-content/60">{{if $c.Change.DiscardedAt}}{{at $c.Change.DiscardedAt}}{{else}}last activity {{at $c.Change.LastActivityAt}}{{end}}</span></p>
+
+    {{else}}
+    {{if eq $c.State "rebuild_requested"}}<p class="text-xs">{{state "changes.state" $c.State}}</p>{{end}}
+    {{with $c.Description}}<p class="line-clamp-2 text-xs text-base-content/80">{{.}}</p>{{end}}
+    {{if $c.Facts}}<ul class="flex flex-col gap-1 text-xs text-base-content/80">{{range $c.Facts}}{{template "wait_fact" .}}{{end}}</ul>{{end}}
+    {{end}}
+
+    {{with $c.Tasks}}{{template "board_tasks" (dict "t" . "c" $c)}}{{end}}
+    {{with $c.Question}}<p class="line-clamp-3 text-xs"><b>Question for a person:</b> {{.}}</p>{{end}}
+    {{if $c.StalledSeconds}}<p class="flex items-center gap-1.5 text-xs">{{iconc "hourglass" "size-3.5 shrink-0 text-warning"}}<span>Nothing happened to it for <span class="tabular-nums">{{seconds $c.StalledSeconds}}</span>.</span></p>{{end}}
+    {{if $c.Moves}}<div class="mt-1 flex flex-wrap gap-1.5">{{range $c.Moves}}{{template "board_move" (dict "m" . "c" $c)}}{{end}}</div>{{end}}
+  </div>
+</li>
+{{end}}
+
+{{define "board"}}{{$p := .Page}}{{$at := .ReadAt}}
+<header class="mb-4">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Board</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">The changes of the workspace, each in the lane its state puts it in. A person moves a card to Backlog or to Discarded, with a button of the card or by dropping it on the lane; the kit puts the cards in every other lane.</p>
+</header>
+
+{{/* The lanes at a glance: on a window that does not hold them all, the ones out of sight still
+     say how many cards they have, and which of them has a card that waits for a person. */}}
+<nav class="mb-3" aria-label="Lanes">
+  <ul id="board-lanes" data-live-region class="flex flex-wrap gap-2">
+    {{range $p.Lanes}}
+    <li>
+      {{if and .Strip (not .Folded)}}<span class="btn btn-sm btn-disabled touch:min-h-11" aria-disabled="true">{{.Title}}<span class="badge badge-sm badge-ghost tabular-nums">{{.Count}}</span></span>
+      {{else}}<a class="btn btn-sm touch:min-h-11" href="{{if .Strip}}{{.Toggle}}{{end}}#lane-{{.Key}}">{{.Title}}<span class="badge badge-sm tabular-nums {{if .Urgent}} badge-error {{else}} badge-ghost {{end}}">{{.Count}}</span>{{if .Urgent}}<span class="sr-only">, {{count .Urgent "card waits" "cards wait"}} for a person</span>{{end}}</a>{{end}}
+    </li>
+    {{end}}
+  </ul>
+</nav>
+
+{{/* The lanes are one region: a lane with no card is a strip, and becomes a lane when a card comes.
+     What a strip says is written from top to bottom, and in that writing mode px- pads the top and
+     the bottom and py- the sides: its count is a plain number, so that the strip is never wider
+     than its 48 px. Five lanes of 188 px and the two folded ones fit a window 1440 px wide. A lane
+     is positioned so that what it hides from the eye and leaves for a screen reader (sr-only) stays
+     inside the board when the lane is scrolled out of sight, and does not widen the page. */}}
+<div id="board" data-live-region class="flex max-w-full items-stretch gap-2 overflow-x-auto pb-3 max-sm:snap-x max-sm:snap-mandatory">
+  {{range $p.Lanes}}
+  {{if .Strip}}
+  <section id="lane-{{.Key}}" class="relative flex w-12 shrink-0 scroll-mt-20 flex-col rounded-box border bg-base-200/50 max-sm:hidden {{if .Accepts}} border-base-content/30 {{else}} border-dashed border-base-content/30 {{end}} data-[drop=no]:opacity-50 data-[drop=yes]:border-solid data-[drop=yes]:border-primary data-[drop=yes]:bg-primary/10 data-[over=yes]:outline-2 data-[over=yes]:outline-primary" aria-labelledby="lane-{{.Key}}-title" data-lane="{{.Key}}">
+    <h2 id="lane-{{.Key}}-title" class="flex flex-1 font-display text-sm font-semibold">
+      {{if .Folded}}<a class="flex flex-1 items-center gap-2 rounded-box px-4 py-0.5 [writing-mode:vertical-rl] hover:bg-base-content/10" href="{{.Toggle}}" aria-expanded="false" title="Show the cards of {{.Title}}">{{iconc .Icon "size-4 shrink-0 text-primary"}}<span>{{.Title}}</span><span id="lane-{{.Key}}-count" class="text-xs font-medium tabular-nums [writing-mode:horizontal-tb]">{{.Count}}</span>{{iconc "chevrons-right" "size-4 shrink-0 opacity-60"}}</a>
+      {{else}}<span class="flex flex-1 items-center gap-2 px-4 py-0.5 text-base-content/70 [writing-mode:vertical-rl]" title="{{.Empty}}">{{iconc .Icon "size-4 shrink-0"}}<span>{{.Title}}</span><span id="lane-{{.Key}}-count" class="text-xs font-medium tabular-nums [writing-mode:horizontal-tb]">{{.Count}}</span></span>{{end}}
+    </h2>
+  </section>
+  {{else}}
+  <section id="lane-{{.Key}}" class="relative flex min-w-47 flex-1 shrink-0 scroll-mt-20 flex-col rounded-box border bg-base-200/50 max-sm:min-w-full max-sm:snap-center sm:max-w-md {{if .Accepts}} border-base-content/30 {{else}} border-dashed border-base-content/30 {{end}} data-[drop=no]:opacity-50 data-[drop=yes]:border-solid data-[drop=yes]:border-primary data-[drop=yes]:bg-primary/10 data-[over=yes]:outline-2 data-[over=yes]:outline-primary" aria-labelledby="lane-{{.Key}}-title" data-lane="{{.Key}}">
+    <div class="flex items-start justify-between gap-2 px-3 pt-3">
+      <h2 id="lane-{{.Key}}-title" class="flex items-center gap-2 font-display text-sm font-semibold">{{iconc .Icon "size-4 shrink-0 text-primary"}}{{.Title}}<span id="lane-{{.Key}}-count" class="badge badge-sm badge-ghost tabular-nums">{{.Count}}</span></h2>
+      {{if .Folded}}<a class="btn btn-xs btn-square btn-ghost touch:btn-sm touch:min-h-11 touch:min-w-11" href="{{.Toggle}}" aria-expanded="true" aria-controls="lane-{{.Key}}-cards" title="Fold {{.Title}}">{{icon "chevrons-left"}}<span class="sr-only">Fold {{.Title}}</span></a>{{end}}
+    </div>
+    {{if .Folded}}<p class="px-3 pt-0.5 text-xs text-base-content/60">{{if eq .Key "integrated"}}The changes integrated in the last {{count $p.IntegratedDays "day" "days"}}.{{else}}Abandoned changes, rejected proposals, and changes the backlog no longer lists.{{end}}</p>{{end}}
+    <div id="lane-{{.Key}}-cards" class="min-h-24 flex-1 p-2">
+      {{if .Cards}}<ul class="flex flex-col gap-2">{{range .Cards}}{{template "board_card" (dict "c" . "at" $at)}}{{end}}</ul>
+      {{else}}<p class="px-2 py-6 text-center text-xs text-base-content/60">{{.Empty}}</p>{{end}}
+      {{range .More}}<p class="px-1 pt-2 text-center text-xs"><a class="link touch:inline-flex touch:min-h-11 touch:items-center" href="{{.Href}}">{{.Label}}</a></p>{{end}}
+    </div>
+  </section>
+  {{end}}
+  {{end}}
+</div>
+
+<div id="board-empty" data-live-region>{{if $p.Empty}}<div class="card card-border mt-3 bg-base-100">{{template "empty" (dict "icon" "square-kanban" "title" "The board has no card yet." "text" "A change gets its card when it enters the backlog, and a proposal when a cycle makes it.")}}</div>{{end}}</div>
+<div class="mt-2 flex max-w-3xl flex-col gap-1.5 text-xs text-base-content/60">
+  <p class="flex flex-wrap items-center gap-x-4 gap-y-1">
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-3 w-5 rounded-sm border border-base-content/50" aria-hidden="true"></span>A lane that takes the cards a person moves to it</span>
+    <span class="inline-flex items-center gap-1.5"><span class="inline-block h-3 w-5 rounded-sm border border-dashed border-base-content/50" aria-hidden="true"></span>A lane only the kit puts cards in</span>
+  </p>
+  <p>A card with no button is moved by the kit alone: a change a worker builds or the merger integrates is not taken from them here. A card that waits in Backlog or in Blocked says so once nothing has happened to it for {{count $p.StalledAfterHours "hour" "hours"}}.</p>
+</div>
+{{end}}

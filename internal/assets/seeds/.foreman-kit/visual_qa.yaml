@@ -1,0 +1,23 @@
+# ==============================================================================
+# .foreman-kit/visual_qa.yaml - The browser session
+# ==============================================================================
+# Seed: created once by `foreman-kit init`, then owned by this application.
+# Read by `foreman-kit visual-qa`. The session runs in an agent app (Claude,
+# Hermes) with a browser, scheduled as its own task with the routine prompt of the
+# foreman-kit-visual-qa skill. The cycle queues every change the merger integrates
+# for it, and it runs the strategies of .foreman-kit/exploration.yaml whose session is
+# visual_qa.
+
+enabled: true # false: integrated changes are not queued for it
+time_budget: 40m # what one session is told it may spend
+expires_after: 70m # a session that never ended frees its lock after this
+max_checks: 5 # queued checks one session takes; the rest wait
+max_findings: 3 # findings one session queues or proposes; the rest stay in its report
+# The FOREMANKIT_SLOT of the session's commands, which run in the _visual_qa worktree
+# (what is on origin). none: the ports and databases of the main checkout, and the
+# browser's approvals for them. A number (97 is free) gives the session its own, as
+# each repository's env_script derives them; its visual_qa.prepare readies them.
+slot: none
+# Application skills the session uses to verify and explore, for example
+# [browser-qa]. Empty: the agent app's own browser.
+skills: []

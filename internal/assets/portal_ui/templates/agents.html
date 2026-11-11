@@ -1,0 +1,107 @@
+{{/* Agents: the engines the kit runs its prompts on. It draws .Page, the struct its read returns
+     (internal/portal/page_agents.go): what this machine has and this application uses, the health
+     and the processes the registry has for each engine, and its attempts since a date. */}}
+
+{{/* One setting of the application: its value in effect and where it is written, or why the kit
+     cannot use it. Takes a SettingValue. */}}
+{{define "agents_setting"}}<dd class="mt-0.5">
+  {{if .Value}}<code class="font-mono font-medium">{{.Value}}</code>{{else}}<span class="inline-flex items-center gap-1.5 font-medium text-warning">{{iconc "triangle-alert" "size-4 shrink-0"}}{{or .Problem "not set"}}</span>{{end}}
+  <p class="text-xs text-base-content/60"><a class="link link-hover inline-flex min-h-6 items-center touch:min-h-11" href="{{settingHref .Key}}">{{.Where}}</a>{{with .OverriddenBy}}, replaced by <code class="font-mono">{{.}}</code> for the process of this portal, until it stops{{end}}</p>
+</dd>{{end}}
+
+{{define "agents"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Agents</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">The engines the kit runs its prompts on: this machine has {{$p.Installed}} of them and this application uses {{$p.Selected}}. Their attempts are {{if $p.Since}}the ones since {{at $p.Since}}{{else}}all of the ones on record{{end}}.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-3">
+    <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="Period">
+      {{range $p.Periods}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}</a>{{end}}
+    </div>
+    <a href="/executions/new" class="btn btn-sm btn-primary touch:min-h-11">{{icon "terminal"}}New agent run</a>
+  </div>
+</header>
+
+<div class="flex flex-col gap-6">
+  <section class="card card-border bg-base-100 p-4" aria-labelledby="agents-setup-title">
+    <h2 id="agents-setup-title" class="sr-only">How this application runs its agents</h2>
+    <dl class="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-3">
+      <div><dt class="text-base-content/70">It picks among the agents of a role</dt>{{template "agents_setting" $p.Setup.Selection}}</div>
+      <div><dt class="text-base-content/70">What it lets an agent do</dt>{{template "agents_setting" $p.Setup.Permissions}}</div>
+      <div><dt class="text-base-content/70">It stops an agent that shows no activity for</dt>{{template "agents_setting" $p.Setup.IdleTimeout}}</div>
+    </dl>
+  </section>
+
+  <section aria-labelledby="agents-list-title">
+    <h2 id="agents-list-title" class="sr-only">The engines</h2>
+    <div id="agents-list" data-live-region class="card card-border min-w-0 bg-base-100">
+      {{if $p.Agents}}
+      <div class="max-w-full overflow-x-auto">
+        <table class="table table-stack">
+          <thead><tr><th>Agent</th><th>Health</th><th>Running now</th><th>Attempts</th><th>Inactivity</th><th><span class="sr-only">Ping it</span></th></tr></thead>
+          <tbody>
+            {{range $p.Agents}}{{$a := .}}
+            <tr class="align-top hover:bg-base-200/60">
+              <td class="min-w-44">
+                <div class="flex items-start gap-3">
+                  <span class="grid size-9 shrink-0 place-items-center rounded-sm {{if agentLogo .Name}} border border-base-content/10 bg-white p-1 {{if not .Installed}} grayscale {{end}}{{else}} bg-base-200 {{end}}">{{if agentLogo .Name}}{{agentIcon .Name "size-full"}}{{else}}{{agentIcon .Name "size-4"}}{{end}}</span>
+                  <div class="min-w-0">
+                    <p class="font-mono font-semibold">{{.Name}}</p>
+                    {{with .Label}}<p class="text-xs text-base-content/60">{{.}}</p>{{end}}
+                    <p class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                      {{if .Selected}}<span class="badge badge-sm badge-soft badge-success whitespace-nowrap">{{iconc "check" "size-3 shrink-0"}}used here{{with .Roles}}: {{join . ", "}}{{end}}</span>{{end}}
+                      {{if not .Installed}}<span class="badge badge-sm badge-soft badge-warning whitespace-nowrap">{{iconc "triangle-alert" "size-3 shrink-0"}}not on this machine</span>{{end}}
+                      {{if not .Known}}<span class="badge badge-sm badge-ghost whitespace-nowrap">not one the kit ships</span>{{end}}
+                    </p>
+                  </div>
+                </div>
+              </td>
+              <td>
+                {{state "engines.health_status" .Health}}
+                {{if .LastCheckedAt}}<p class="mt-1 text-xs text-base-content/70">checked {{at .LastCheckedAt}}{{if and (eq .Health "ok") .LastLatencyMS}}, answered in <span class="tabular-nums">{{millis .LastLatencyMS}}</span>{{end}}</p>{{end}}
+                {{with .LastError}}<p class="mt-1 line-clamp-2 break-words text-xs text-base-content/80" title="{{.}}">{{.}}</p>{{end}}
+                {{if gt .ConsecutiveFailures 1}}<p class="mt-1 text-xs text-base-content/70">It failed {{times .ConsecutiveFailures}} in a row.</p>{{end}}
+                {{with .CooldownUntil}}<p class="mt-1 text-xs text-warning">The kit leaves it for last, and takes it back {{at .}}.</p>{{end}}
+              </td>
+              <td class="min-w-40">
+                {{if or .Runs .Quiet}}
+                <ul class="flex flex-col gap-1.5 text-sm">
+                  {{range .Runs}}
+                  <li>
+                    <p class="flex flex-wrap items-center gap-x-2">{{if .ExecID}}<a class="link link-hover inline-flex min-h-6 min-w-6 items-center font-medium touch:min-h-11 touch:min-w-11" href="/executions/{{enc .ExecID}}">{{or .Role "a run"}}</a>{{else}}<span class="font-medium">{{or .Role "a process"}}</span>{{end}}{{with .ChangeName}}<span class="text-xs text-base-content/70">on {{template "change_link" .}}</span>{{end}}<span class="text-xs text-base-content/60">since {{at .ClaimedAt}}</span></p>
+                    {{with .Idle}}<p class="mt-0.5 flex items-start gap-1.5 text-xs text-warning">{{iconc "hourglass" "mt-0.5 size-3.5 shrink-0"}}<span>No activity for <span class="tabular-nums">{{seconds .IdleSeconds}}</span>: it is stopped at <span class="tabular-nums">{{seconds .LimitSeconds}}</span>.</span></p>{{end}}
+                  </li>
+                  {{end}}
+                  {{range .Quiet}}
+                  <li class="flex items-start gap-1.5 text-xs text-warning">{{iconc "hourglass" "mt-0.5 size-3.5 shrink-0"}}<span>No activity for <span class="tabular-nums">{{seconds .IdleSeconds}}</span> in <a class="link inline-flex min-h-6 min-w-6 items-center touch:min-h-11 touch:min-w-11" href="/executions/{{enc .ExecID}}">an execution</a>: it is stopped at <span class="tabular-nums">{{seconds .LimitSeconds}}</span>.</span></li>
+                  {{end}}
+                </ul>
+                {{else}}<span class="text-base-content/60">nothing</span>{{end}}
+              </td>
+              <td>
+                {{with .Stat}}
+                <p class="tabular-nums"><span class="font-medium">{{.Attempts}}</span>{{if .Running}} <span class="text-xs text-base-content/60">{{.Running}} still going</span>{{end}}</p>
+                {{if $a.Ended}}<p class="mt-0.5 text-xs text-base-content/70">{{$a.Good}} ended well, {{share $a.Good $a.Ended}} of the {{$a.Ended}} that ended</p>{{end}}
+                {{with $a.Others}}<p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">{{range .}}<span class="inline-flex items-center gap-1.5">{{state "execution_attempts.outcome" .Outcome}}<span class="text-xs tabular-nums">{{.Count}}</span></span>{{end}}</p>{{end}}
+                <p class="mt-1 text-xs text-base-content/70">{{if $a.Ended}}<span class="tabular-nums">{{seconds $a.WorkSeconds}}</span> at work, {{end}}last used {{at .LastUsedAt}}</p>
+                {{else}}<span class="text-base-content/60">none in this period</span>{{end}}
+              </td>
+              <td class="min-w-40">
+                {{with .Stat}}{{if .IdlePeriods}}
+                <p class="text-sm">{{if .Stalls}}<span class="font-medium text-warning">Stopped {{times .Stalls}}</span>{{else}}Never stopped{{end}} <span class="text-xs text-base-content/60">in {{count .IdlePeriods "pause" "pauses"}}</span></p>
+                {{if .LongestRecoveredIdleSeconds}}<p class="mt-0.5 text-xs text-base-content/70">The longest pause it came back from: <span class="font-medium tabular-nums text-base-content">{{seconds .LongestRecoveredIdleSeconds}}</span></p>{{end}}
+                {{else}}<span class="text-base-content/60">no pause</span>{{end}}{{else}}<span class="text-base-content/60">–</span>{{end}}
+              </td>
+              <td class="text-right">{{if .Known}}<button class="btn btn-sm btn-square touch:min-h-11 touch:min-w-11" data-post="/api/engines/{{enc .Name}}/ping" data-refresh="regions" data-busy="Pinging {{.Name}}: it can take a minute and a half" title="Ping {{.Name}}">{{icon "radar"}}<span class="sr-only">Ping {{.Name}}</span></button>{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}{{template "empty" (dict "icon" "bot" "title" "This machine has none of the agents the kit runs." "text" "Install one, name it in the agents of the application, and it appears here with its health.")}}{{end}}
+      <p class="border-t border-base-content/10 px-4 py-3 text-xs text-base-content/60">An attempt is one try of an engine at a prompt: an execution that falls back to another engine, or tries one again, makes several. The kit stops an agent that shows no activity for the time above; the longest pause an engine came back from is what that time has to stay above.{{if or $p.Hidden $p.ShowAll}} <a class="link touch:inline-flex touch:min-h-11 touch:items-center" href="{{$p.Toggle}}">{{if $p.ShowAll}}Leave out the engines this machine does not have and nothing used{{else}}Show the {{count $p.Hidden "engine" "engines"}} the kit can run that this machine does not have{{end}}</a>.{{end}}</p>
+    </div>
+  </section>
+</div>
+{{end}}

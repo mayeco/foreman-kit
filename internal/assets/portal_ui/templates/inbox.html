@@ -1,0 +1,128 @@
+{{/* Needs you: everything that waits for a person, in one list, with the same buttons for a kind of
+     row wherever it shows. It draws .Page, the struct its read returns (internal/portal/page_inbox.go). */}}
+
+{{/* The title of a group of rows. dict: id, icon, title, n */}}
+{{define "inbox_group"}}
+<h2 id="{{.id}}" class="mb-2 flex scroll-mt-20 items-center gap-2 font-display text-base font-semibold">{{iconc .icon "size-4 text-primary"}}{{.title}}<span class="badge badge-sm badge-ghost tabular-nums">{{.n}}</span></h2>
+{{end}}
+
+{{define "inbox"}}{{$p := .Page}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Needs you</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">What waits for a decision of yours. What stops work comes first; the proposals nobody decided on are a list of their own, at the end.</p>
+</header>
+
+<div id="inbox-rows" data-live-region class="flex flex-col gap-6">
+  {{if not $p.Count}}
+  <div class="card card-border bg-base-100">{{template "empty" (dict "icon" "shield-check" "title" "Nothing waits for you." "text" "A blocked change, a question from an agent, a base branch that fails on its own, a worker that is gone, a proposal to decide and a pause of the kit appear here.")}}</div>
+  {{else if and $p.Kind (not (or $p.Pause $p.Blocked $p.Questions $p.BrokenBases $p.LostRuns $p.Proposals))}}
+  <div class="card card-border bg-base-100">{{template "empty" (dict "icon" "shield-check" "title" "Nothing of this kind waits for you." "text" "")}}<p class="pb-6 text-center"><a class="btn btn-sm touch:min-h-11" href="/inbox">Show everything that waits</a></p></div>
+  {{end}}
+
+  {{with $p.Pause}}
+  <section aria-labelledby="inbox-pause">
+    {{template "inbox_group" (dict "id" "inbox-pause" "icon" "pause" "title" "The kit is paused" "n" 1)}}
+    <div class="card card-border bg-base-100">
+      <div class="flex flex-wrap items-start justify-between gap-3 p-4 text-sm">
+        <div class="flex min-w-0 flex-col gap-1">
+          <p>{{if .Reason}}<b>{{.Reason}}</b>{{else}}No reason was given.{{end}}</p>
+          <p class="text-base-content/70">Paused {{at .PausedAt}}, {{(word "workspace_pauses.paused_by" .PausedBy).Text}}{{with .ChangeName}}, while working on {{template "change_ref" .}}{{end}}. Nothing new starts until it is resumed: no cycle, no dispatch, no merge.</p>
+        </div>
+        <button class="btn btn-sm touch:min-h-11" data-post="/api/workspace/resume" data-toast="Resumed" data-confirm="{{with .Reason}}It was paused: {{.}}. {{end}}Once resumed, the cycle, the dispatcher and the merger start again on their next pass." data-confirm-title="Resume the kit?" data-confirm-ok="Resume">{{icon "play"}}Resume</button>
+      </div>
+    </div>
+  </section>
+  {{end}}
+
+  {{if $p.Blocked}}
+  <section aria-labelledby="inbox-blocked">
+    {{template "inbox_group" (dict "id" "inbox-blocked" "icon" "octagon-alert" "title" "Blocked changes" "n" (len $p.Blocked))}}
+    <ul class="list card card-border bg-base-100">
+      {{range $p.Blocked}}
+      <li class="list-row items-start gap-3 text-sm">
+        {{iconc "octagon-alert" "mt-0.5 size-5 shrink-0 text-error"}}
+        <div class="flex min-w-0 flex-col gap-1.5">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">{{template "change_link" .ChangeName}}<span class="badge badge-sm badge-error">{{label .Reason}}</span>{{if .Quarantine.ApprovedRisk}}{{badge "risk accepted" "success"}}{{end}}</div>
+          <p class="text-base-content/80">Blocked {{at .BlockedAt}}{{with .Stage}}, at the {{label .}} stage{{end}}. The kit retried it {{times .Quarantine.Retries}} and rebuilt it {{times .Quarantine.Rebuilds}} before.</p>
+          {{with .Question}}<p><b>Question for a person:</b> {{.}}</p>{{end}}
+          {{with .Details}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-2 text-sm font-medium touch:py-3">Show why it was blocked</summary><div class="collapse-content"><pre class="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{{.}}</pre></div></details>{{end}}
+        </div>
+        <div class="list-col-wrap flex flex-wrap gap-2">
+          {{template "unblock_btns" (dict "name" .ChangeName "reason" .Reason)}}
+          {{if .HasWorktree}}<a class="btn btn-sm touch:min-h-11" href="/changes/{{enc .ChangeName}}/intervene">{{icon "wrench"}}Intervene</a>{{end}}
+        </div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{if $p.Questions}}
+  <section aria-labelledby="inbox-questions">
+    {{template "inbox_group" (dict "id" "inbox-questions" "icon" "message-circle-question" "title" "Questions from agents" "n" (len $p.Questions))}}
+    <ul class="list card card-border bg-base-100">
+      {{range $p.Questions}}
+      <li class="list-row items-start gap-3 text-sm">
+        {{iconc "message-circle-question" "mt-0.5 size-5 shrink-0 text-warning"}}
+        <div class="flex min-w-0 flex-col gap-1.5">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">{{template "change_link" .ChangeName}}</div>
+          <p><b>Question for a person:</b> {{.Question}}</p>
+          <p class="text-base-content/70">Answer it in the worktree of the change: send a prompt to an agent from Intervene, or edit the files by hand. Then unblock.</p>
+        </div>
+        <div class="flex flex-wrap gap-2 max-md:list-col-wrap md:justify-end">
+          <a class="btn btn-sm touch:min-h-11" href="/changes/{{enc .ChangeName}}/intervene">{{icon "wrench"}}Intervene</a>
+          <button class="btn btn-sm touch:min-h-11" data-post="/api/changes/{{enc .ChangeName}}/unblock" data-body='{"reset_retries":false}' data-toast="Unblocked {{.ChangeName}}">{{icon "lock-open"}}Unblock</button>
+        </div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{if $p.BrokenBases}}
+  <section aria-labelledby="inbox-bases">
+    {{template "inbox_group" (dict "id" "inbox-bases" "icon" "git-branch" "title" "Base branches that fail on their own" "n" (len $p.BrokenBases))}}
+    <ul class="list card card-border bg-base-100">
+      {{range $p.BrokenBases}}{{template "broken_base_row" .}}{{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{if $p.LostRuns}}
+  <section aria-labelledby="inbox-lost">
+    {{template "inbox_group" (dict "id" "inbox-lost" "icon" "lock-open" "title" "Workers that are gone" "n" (len $p.LostRuns))}}
+    <ul class="list card card-border bg-base-100">
+      {{range $p.LostRuns}}
+      <li class="list-row items-start gap-3 text-sm">
+        {{iconc "lock-open" "mt-0.5 size-5 shrink-0 text-error"}}
+        <div class="flex min-w-0 flex-col gap-1.5">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">{{template "change_link" .ChangeName}}{{badge "worker gone" "error"}}</div>
+          <p class="text-base-content/80">The run that started {{at .StartedAt}} is still open, and nothing holds the lease of the change{{with .LeaseExpiredAt}}: it ran out {{at .}}{{end}}. Reclaim it and the dispatcher takes the change again.</p>
+        </div>
+        <div class="max-md:list-col-wrap">{{template "reclaim_btn" (dict "name" .ChangeName)}}</div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
+  {{if $p.Proposals}}
+  <section aria-labelledby="inbox-proposals">
+    {{template "inbox_group" (dict "id" "inbox-proposals" "icon" "lightbulb" "title" "Proposals to decide" "n" (len $p.Proposals))}}
+    <p class="mb-2 max-w-3xl text-sm text-base-content/70">A cycle proposed these changes. An approved one is queued when the backlog has room; a rejected one is not proposed again.</p>
+    <ul class="list card card-border bg-base-100">
+      {{range $p.Proposals}}
+      <li class="list-row items-start gap-3 text-sm">
+        {{iconc "lightbulb" "mt-0.5 size-5 shrink-0 text-base-content/60"}}
+        <div class="flex min-w-0 flex-col gap-1.5">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="font-mono font-medium">{{.ID}}</span>{{if eq .Priority "critical"}}<span class="badge badge-sm badge-error">critical priority</span>{{else if eq .Priority "high"}}<span class="badge badge-sm badge-warning">high priority</span>{{end}}<span class="text-xs text-base-content/60">proposed {{at .ProposedAt}}{{with .Source}} · from {{label .}}{{end}}</span></div>
+          {{with .Description}}{{template "clamped" .}}{{end}}
+        </div>
+        <div class="flex flex-wrap gap-2 max-md:list-col-wrap md:justify-end">{{template "proposal_btns" .ID}}</div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+</div>
+{{end}}

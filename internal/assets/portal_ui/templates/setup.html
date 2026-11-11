@@ -1,0 +1,71 @@
+{{/* System → Setup: what takes this application from installed to ready to schedule. It draws
+     .Page, the struct its read returns (internal/portal/page_system.go): the checklist the kit works
+     out, the same one `foreman-kit setup` prints. */}}
+
+{{define "setup"}}{{$p := .Page}}
+{{template "system_nav" .}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Setup</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">From installed to ready to schedule, on the base branch <code class="font-mono">{{$p.BaseBranch}}</code>: {{if $p.Todo}}{{count $p.Todo "thing is" "things are"}} left to do, each with what does it.{{else}}nothing is left to do.{{end}}</p>
+</header>
+{{with $p.Next}}
+<div role="status" class="alert alert-soft alert-warning mb-5 items-start text-base-content">{{iconc "arrow-right" "size-4 shrink-0 text-warning"}}
+  <div class="min-w-0"><p class="break-words text-sm"><span class="font-semibold">Next:</span> {{.What}}</p><code class="mt-1 block break-all font-mono text-xs">{{.Fix}}</code></div>
+</div>
+{{end}}
+<div class="grid gap-6 lg:grid-cols-2">
+  {{range $p.Sections}}
+  <section class="card card-border min-w-0 bg-base-100" aria-labelledby="setup-{{.Name}}-title">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="setup-{{.Name}}-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "wrench" "size-4 text-primary"}}{{.Title}}</h2></div>
+    <ul class="list">
+      {{range .Items}}
+      <li class="list-row items-start gap-3 py-2.5">
+        {{if .Done}}{{iconc "circle-check" "mt-0.5 size-4 shrink-0 text-success"}}{{else}}{{iconc "circle" "mt-0.5 size-4 shrink-0 text-warning"}}{{end}}
+        <div class="min-w-0"><p class="break-words text-sm"><span class="sr-only">{{if .Done}}Done: {{else}}To do: {{end}}</span>{{.What}}</p>{{with .Fix}}<code class="mt-1 block break-all font-mono text-xs text-base-content/70">{{.}}</code>{{end}}</div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+  {{if or $p.Schedule.Daemon $p.Schedule.Crontab}}
+  <section class="card card-border min-w-0 bg-base-100 lg:col-span-2" aria-labelledby="setup-schedule-title">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="setup-schedule-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "clock" "size-4 text-primary"}}What makes its cycles run</h2></div>
+    <dl class="flex flex-col gap-3 p-4 text-sm">
+      {{with $p.Schedule.Daemon}}<div><dt class="text-base-content/70">The daemon of the kit, which starts the cycles itself</dt><dd class="mt-1"><code class="block break-all font-mono text-xs" tabindex="0">{{.}}</code></dd></div>{{end}}
+      {{with $p.Schedule.Crontab}}<div><dt class="text-base-content/70">A line of crontab, for an application that runs no daemon</dt><dd class="mt-1"><code class="block break-all font-mono text-xs" tabindex="0">{{.}}</code></dd></div>{{end}}
+    </dl>
+  </section>
+  {{end}}
+  <section class="card card-border min-w-0 bg-base-100 lg:col-span-2" aria-labelledby="setup-sync-title">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="setup-sync-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "refresh-cw" "size-4 text-primary"}}Bring the repositories up to date</h2></div>
+    <div class="flex flex-col gap-3 p-4">
+      <p class="max-w-3xl text-sm text-base-content/70">The main checkout and each child repository are brought up to date with origin, as <code class="font-mono">foreman-kit sync</code> does: a branch that can be fast-forwarded is, and one that diverged is said and left as it is. Publishing also pushes the commits a child repository has and origin does not, and then commits and pushes their pointers in the main checkout; it is refused while a dispatcher or a merger runs. Neither is done while a visual QA session is in progress: the main checkout is left as it is until the session ends.</p>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn btn-sm touch:min-h-11" data-post="/api/repos/sync" data-body='{"publish":false}' data-title="What the sync said" data-busy="Bringing the repositories up to date…">{{icon "refresh-cw"}}Sync</button>
+        <button class="btn btn-sm touch:min-h-11" data-post="/api/repos/sync" data-body='{"publish":true}' data-confirm="Sync, and push to origin the commits the child repositories have that origin does not, with their pointers in the main checkout? A push is not undone from here." data-confirm-title="Sync and publish?" data-confirm-ok="Sync and publish" data-title="What the sync said" data-busy="Bringing the repositories up to date, and publishing…">{{icon "upload"}}Sync and publish</button>
+      </div>
+    </div>
+  </section>
+  <section class="card card-border min-w-0 bg-base-100 lg:col-span-2" aria-labelledby="setup-repo-title">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="setup-repo-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "folder-git-2" "size-4 text-primary"}}Add or prepare a child repository</h2></div>
+    <form class="grid grid-cols-1 gap-4 p-4 md:grid-cols-3" data-api="/api/system/repos" data-bool="force" data-title="What the kit did with the repository">
+      <fieldset class="fieldset">
+        <label class="label" for="repo-url">Git URL, to add a repository</label>
+        <input id="repo-url" name="url" class="input input-sm w-full font-mono touch:min-h-11" placeholder="git@github.com:acme/payments.git" autocomplete="off">
+      </fieldset>
+      <fieldset class="fieldset">
+        <label class="label" for="repo-name">Name under repos/</label>
+        <input id="repo-name" name="name" pattern="[a-z0-9][a-z0-9._\-]{0,62}" title="Lowercase letters, digits, dots, underscores and hyphens, starting with a letter or a digit" class="input input-sm validator w-full font-mono touch:min-h-11" placeholder="payments" autocomplete="off">
+        <p class="validator-hint hidden">Lowercase letters, digits, dots, underscores and hyphens, starting with a letter or a digit.</p>
+      </fieldset>
+      <fieldset class="fieldset">
+        <label class="label" for="repo-branch">Its branch, when it is added</label>
+        <input id="repo-branch" name="branch" class="input input-sm w-full font-mono touch:min-h-11" placeholder="main" autocomplete="off">
+      </fieldset>
+      <label class="label cursor-pointer justify-start gap-2 whitespace-normal text-sm md:col-span-3 touch:min-h-11"><input type="checkbox" name="force" class="checkbox checkbox-sm shrink-0"><span class="min-w-0">Write its repo.config.yaml again over the one it has</span></label>
+      <p class="text-xs text-base-content/60 md:col-span-3">With a URL the repository is added under repos/ and prepared. With a name alone, the repository of that name is prepared: it gets its repo.config.yaml.</p>
+      <div class="md:col-span-3"><button type="submit" class="btn btn-sm btn-primary touch:min-h-11">{{icon "plus"}}Do it</button></div>
+    </form>
+  </section>
+</div>
+{{end}}

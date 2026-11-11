@@ -1,0 +1,103 @@
+# ==============================================================================
+# config/pipeline.yaml - How the pipeline runs: base branch, parallelism, limits
+# ==============================================================================
+# Seed: created once by `openspec-kit install`, then owned by this application.
+# Edit via `openspec-kit config set pipeline.<key> <value>`; the dispatcher,
+# merger, cycle, and visual QA read it on every run. Environment variables named
+# after each key override it for one manual run only.
+
+# The branch of this repository that every change starts from and the merger
+# publishes to, on origin. Each child repository names its own base branch in
+# its repo.config.yaml.
+base_branch: master # OPENSPEC_BASE_BRANCH
+
+dispatch:
+  workers: 2 # changes one dispatch builds in parallel; OPENSPEC_WORKERS
+  wait_seconds: 3600 # how long a cycle's dispatch waits while changes wait on merges; OPENSPEC_WAIT_TIMEOUT
+  merge_interval_seconds: 10 # how often a watching merger looks for ready changes, and an idle dispatcher fetches origin; OPENSPEC_MERGE_INTERVAL
+  # A change whose code no longer rebases onto the base branch (another change edited
+  # the same lines first) is rebuilt on the new base this many times before it waits
+  # for a human as rebase_conflict. While a rebuild runs, another change may merge into
+  # the same files again. 0: never rebuild. OPENSPEC_CONFLICT_REBUILDS
+  conflict_rebuilds: 3
+  # Every this many hours an item waits in the backlog, it is ordered one priority
+  # higher (low, normal, high, critical), so low items are not starved by a steady
+  # flow of higher ones. Its priority in the backlog does not change. 0: off.
+  # OPENSPEC_AGING_HOURS
+  aging_hours: 6
+  # A change quarantined for a reason that can heal on its own (gate_failure,
+  # incomplete_tasks, spec_invalid, plan_review, scenario_coverage, repair_stalled,
+  # rebase_conflict, push_failed, manifest_stale) runs again this many times, from its
+  # kept worktree with fresh repair rounds, its first agent call told what stopped it.
+  # Never a policy_violation, spec_ambiguity, risk_review, missing_child_commits or a
+  # system failure: those wait for a human. 0: never, and a child repository's base
+  # that fails on its own (gates.merge_changed_files: verify) is not checked again
+  # automatically either (otherwise it is, once). OPENSPEC_BLOCKED_RETRIES
+  blocked_retries: 1
+  # How long a quarantined change waits before that retry, and a broken base before its
+  # one automatic recheck. OPENSPEC_BLOCKED_RETRY_HOURS
+  blocked_retry_hours: 1
+
+limits:
+  agent_seconds: 7200 # one attempt of an agent (the cycle's judgment: qa_time_budget_minutes + 15); AGENT_TIMEOUT_SECONDS
+  # An agent whose processes do no work, whose work directory does not change and whose
+  # output does not grow for this many seconds has stalled (a CLI that froze instead of
+  # exiting): it is stopped, and the attempt counts as failed. Work it runs outside its own
+  # processes (inside containers) is not seen. From a quarter of this time on,
+  # `openspec-kit status` and the portal show how long the agent has been idle.
+  # 0: never. AGENT_IDLE_SECONDS
+  agent_idle_seconds: 1200
+  # CPU counts as work only while the agent's processes use at least this share of one core,
+  # in percent, between two looks of the watchdog (a minute apart): a frozen CLI still wakes
+  # up for its timers (about 1%), a test run or a build uses far more. 0: any CPU use counts,
+  # so only an agent that uses none at all stalls. AGENT_IDLE_CPU_PERCENT
+  agent_idle_cpu_percent: 5
+  # An agent call that fails (timeout, error) is tried again this many times with the same
+  # agent, then with the next agent of its role; one that hit a usage limit or stalled goes
+  # straight to the next agent. An attempt that left changes is followed by one told what it
+  # changed, to continue from there. 0: no retry. AGENT_RETRIES
+  agent_retries: 1
+  agent_retry_delay_seconds: 120 # wait before trying the same agent again; AGENT_RETRY_DELAY_SECONDS
+  agent_budget_usd: 5 # Claude Code's spending cap per call; AGENT_MAX_BUDGET_USD
+  gate_seconds: 2700 # one repository's gates, in the dispatcher and the merger; OPENSPEC_GATE_TIMEOUT
+  lease_seconds: 7200 # a change's lease is stale after this; OPENSPEC_LEASE_TTL
+
+gates:
+  # At merge, which commits of a child repository count as the change's, for the
+  # OPENSPEC_CHANGED_FILES its gates see and for its regression_when. The merger always
+  # rebases the change onto the repository's current base branch, so a commit pushed
+  # there outside the pipeline (a hotfix) is integrated with the next change that
+  # touches the repository either way; this only decides whether it is tested as if
+  # the change had made it.
+  #   verify (default): only the change's own commits count, and the hotfix is tested
+  #     once on its own. When its files trigger regression_when, the merger runs the
+  #     repository's regression on the base alone before the change's gates; when a
+  #     gate fails at merge, it reruns that gate on the base alone to tell whether the
+  #     hotfix or the change broke it. A base that fails on its own holds that
+  #     repository's ready changes (never quarantined, retries untouched) with one
+  #     alert in openspec-kit status; they resume by themselves once the base moves,
+  #     or when the one automatic recheck of that base (dispatch.blocked_retry_hours
+  #     after it failed, never with dispatch.blocked_retries 0) passes, or integrate
+  #     anyway with openspec-kit base accept <repo>. An accepted base covers the tests
+  #     that failed on it alone, for its held changes and for the changes built on it
+  #     afterwards until another commit is pushed outside the pipeline: a change that
+  #     fails any other test is quarantined as its own gate_failure.
+  #   change: only the change's own commits. A hotfix never widens the change's tests
+  #     nor runs the full regression on its own.
+  #   integrated: the hotfix's files count too (more conservative: a hotfix that
+  #     matches regression_when runs the regression with the next change, and one that
+  #     breaks it quarantines every later change of the repository).
+  # Gates that do not read OPENSPEC_CHANGED_FILES run in full either way.
+  # OPENSPEC_MERGE_CHANGED_FILES
+  merge_changed_files: verify
+
+llm:
+  # A model that explains a failure in words (a failing gate, a refusal by the evaluator,
+  # a rebase conflict) and audits a plan. It never writes code: the agents do. Its API key
+  # comes from the environment (OPENSPEC_LLM_API_KEY, or the provider's own variable).
+  enabled: false # OPENSPEC_LLM_ENABLED
+  provider: openai # openai | anthropic | google | openrouter | ollama | compat; OPENSPEC_LLM_PROVIDER
+  model: gpt-4o-mini # OPENSPEC_LLM_MODEL
+  base_url: "" # only for compat and ollama; OPENSPEC_LLM_BASE_URL
+  timeout_seconds: 20 # one request
+  max_retries: 2 # an answer that does not fit what was asked is asked again this many times

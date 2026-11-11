@@ -1,0 +1,114 @@
+# ==============================================================================
+# .foreman-kit/agents.yaml - Which agent CLIs this application uses, who does what and
+# the limits of one call
+# ==============================================================================
+# Written by `foreman-kit init` and `foreman-kit update --agents`, then owned by
+# this application. Read on every agent call and by the preflight. Every key is
+# written here: one that is missing or invalid keeps the agents from running
+# (`foreman-kit config check` names it).
+#
+# The agent CLIs the kit knows, and where the skills of each go:
+#   claude        Claude Code             .claude/skills/
+#   codex         OpenAI Codex            .agents/skills/
+#   copilot       GitHub Copilot          .github/skills/
+#   hermes        Hermes                  .hermes/skills/
+#   opencode      OpenCode                .opencode/skills/
+#   agy           Google Antigravity      .agents/skills/
+#   kilo          Kilo Code               .kilocode/skills/
+#   cline         Cline                   .cline/skills/
+#   pi            pi                      .pi/skills/
+#   omp           oh-my-pi, a fork of pi  .omp/skills/
+#   crush         Charm's Crush           .crush/skills/
+#   cursor-agent  Cursor Agent            .cursor/skills/
+#   zcode         ZCode                   .zcode/skills/
+# Change the agents with `foreman-kit update --agents ...`: it installs their skills
+# and writes their commands below. Everything else may be edited by hand.
+
+agents: [claude] # agent CLIs installed here; each gets the kit's skills
+
+roles:
+  plan: # writes the OpenSpec change of each backlog item
+    agents: [claude] # in order of preference; a role without agents does not run
+    timeout: 30m # one call of this role
+    args: {} # per agent, e.g. {claude: "--model claude-opus-5-5"}
+  build: # implements the tasks in the child repositories
+    agents: [claude]
+    timeout: 2h
+    args: {}
+  cycle: # runs the cycle's judgment
+    agents: [claude]
+    # `foreman-kit config check` warns when budget.total of .foreman-kit/cycle.yaml does
+    # not fit in it
+    timeout: 1h
+    args: {}
+
+# How each call picks among the agents of its role:
+#   in_order    the first one, then the next when it fails
+#   random      any of them first, then the others in the order listed, so the calls
+#               spread over the agents' quotas instead of draining the first
+#   least_busy  the one with the fewest calls running, so changes built at once
+#               spread over them
+selection: in_order
+
+# full: each agent runs its `run` command. restricted: each runs its `restricted`
+# command; an agent without one cannot be used while this is restricted.
+permissions: full
+
+limits:
+  # An agent that shows no work for this long is stopped and the attempt counts as
+  # failed: no CPU at the rate of work across its processes, no change in its
+  # worktree, no output. Work it runs outside its own processes (inside containers)
+  # is not seen. From a quarter of it on, `foreman-kit status` and the portal show
+  # the agent as idle. never: it is not watched
+  idle_timeout: 20m
+  # CPU counts as work from this share of one core, in percent, between two looks of
+  # the watchdog (a minute apart): a frozen CLI still wakes up for its timers (about
+  # 1), a test run or a build uses far more. 0: any CPU use counts
+  idle_cpu_percent: 5
+  # Extra attempts with the same agent after a failure (timeout, error), before the
+  # next agent of its role. None after a usage limit or a stall: those go straight to
+  # the next agent. An attempt that left changes is followed by one told what it
+  # changed, to continue from there. 0: none
+  retries: 1
+  retry_after: 2m # wait before each of those attempts; 0s: none
+  ping_timeout: 3m # the preflight's ping of each agent
+
+outage: # every agent of a role is out: a usage limit, a lost login
+  # No worker starts for one minute; the wait doubles on each further outage, up to
+  # this
+  max_wait: 15m
+  # Outages a change waits through before it is blocked. never: it waits as long as
+  # it takes
+  give_up_after: 3
+
+# Each command runs exactly as written: the kit adds nothing to it.
+#   run         a call while permissions is full
+#   restricted  a call while permissions is restricted
+#   ping        the preflight's ping (the run command when there is none)
+# Placeholders:
+#   {{prompt}}       the prompt, as one argument
+#   {{prompt_file}}  the path of a file that holds the prompt
+#   {{workdir}}      the directory the agent works in
+#   {{timeout}}      the role's timeout, in seconds
+#   {{args}}         the role's args for this agent; a command without it gets them
+#                    after its last word
+# Add a custom agent binary here with its own entry, then list it in a role.
+commands:
+  claude:
+    run: >-
+      claude -p {{prompt}} --output-format json --no-session-persistence --permission-mode
+      bypassPermissions --max-budget-usd 5 --disallowedTools "Bash(git commit *) Bash(git push
+      *) Bash(git rebase *) Bash(git reset *) Bash(git checkout *) Bash(git switch *) Bash(rm
+      -rf *)" {{args}}
+    restricted: >-
+      claude -p {{prompt}} --output-format json --no-session-persistence --permission-mode
+      acceptEdits --max-budget-usd 5 --allowedTools "Read Edit Write Glob Grep Bash(openspec *)
+      Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git show *) Bash(git rev-parse *)
+      Bash(foreman-kit gates *) Bash(foreman-kit exec *) Bash(foreman-kit status *)
+      Bash(foreman-kit progress *) Bash(foreman-kit completed-since *) Bash(foreman-kit
+      evaluation-report *) Bash(foreman-kit prompt-report *) Bash(foreman-kit memory *)
+      Bash(agent-memory *) Bash(foreman-kit visual-qa *) Bash(jev noul *) Bash(jev choice *)
+      Bash(jev score *) Bash(jev eval *) Bash(jev validate *)" --disallowedTools "Bash(git
+      commit *) Bash(git push *) Bash(git rebase *) Bash(git reset *) Bash(git checkout *)
+      Bash(git switch *) Bash(rm -rf *)" {{args}}
+    ping: claude -p {{prompt}} --no-session-persistence --max-budget-usd 0.50 {{args}}

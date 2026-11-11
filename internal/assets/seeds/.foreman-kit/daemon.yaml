@@ -1,0 +1,21 @@
+# ==============================================================================
+# .foreman-kit/daemon.yaml - When the cycle runs and whether the Web Portal is served
+# ==============================================================================
+# Seed: created once by `foreman-kit init`, then owned by this application.
+# Read by the resident process (`foreman-kit -d`) when it starts: restart it after
+# an edit. It builds and merges continuously (each change as soon as it is ready,
+# each backlog item as soon as it is eligible and a worker is free); this file only
+# says when it runs the cycle and whether it serves the portal.
+
+cycle:
+  every: 60m # the longest it waits between the start of two cycles
+  # With a worker free, nothing it can start, room under queue.max_open
+  # (.foreman-kit/cycle.yaml) and a change built, blocked or integrated in either of the
+  # last two cycles, the next cycle starts this long after the last one began. After
+  # two cycles in a row that moved nothing it waits for `every`. never: only `every`
+  every_when_out_of_work: 15m
+
+portal:
+  enabled: false # the daemon serves the Web Portal; -w / --web turns it on for one run
+  bind: 127.0.0.1
+  port: 4567 # the next free one when it is taken, unless --port names one

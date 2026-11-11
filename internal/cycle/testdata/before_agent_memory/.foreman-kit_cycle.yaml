@@ -1,0 +1,57 @@
+# ==============================================================================
+# config/cycle.yaml - What one cycle does: how long it may take and what it may queue
+# ==============================================================================
+# Seed: created once by `openspec-kit init`, then owned by this application.
+# Read by the cycle (`openspec-kit cycle`, or the daemon). When it runs is in
+# config/daemon.yaml; the browser session has its own file, config/visual_qa.yaml.
+# Every key is written here: one that is missing or invalid stops the cycle from
+# starting (`openspec-kit config check` names it).
+
+budget:
+  # What the judgment is told it may spend verifying delivered work and exploring.
+  # Its hard limit is roles.cycle.timeout in config/agents.yaml.
+  total: 45m
+  exploring: 15m # at least this much of it goes to the strategy of the cycle
+
+queue:
+  max_findings: 3 # findings one cycle queues or proposes; the rest stay in its report
+  # Changes that may be open at once: queued, building, ready for the merger, merging,
+  # blocked or waiting to be rebuilt. The cycle queues what still fits, at most
+  # max_findings. With none left it verifies and reports instead, an approved proposal
+  # waits for room, and the daemon starts no cycle before cycle.every
+  # (config/daemon.yaml). Keep it above dispatch.workers (config/pipeline.yaml), or
+  # some workers never have work.
+  max_open: 8
+
+roadmap:
+  file: ROADMAP.md # the features to build, in priority order; "": no roadmap
+  max_proposals: 1 # roadmap features one cycle proposes
+  max_open: 3 # none while this many roadmap proposals are proposed, approved or queued
+
+proposals:
+  # Who approves the proposals in config/agent_proposals.json (improvements, missing
+  # capabilities, roadmap features) before they are queued:
+  #   evaluator  the evaluator (gate proposal_review of config/evaluator.yaml); what it
+  #              does not approve waits for a person
+  #   human      a person: openspec-kit proposals approve <change>
+  #   nobody     every proposal is queued
+  approved_by: evaluator
+  # Who approves a prompt proposal: an edit of config/prompts/plan.md, build.md or
+  # cycle.md that the cycle bases on evidence (repair rounds, openspec-kit prompt-report).
+  # Once approved, `openspec-kit proposals review` applies and checks it, and the cycle records it.
+  #   human   a person: openspec-kit proposals show <change>, then approve <change>
+  #   nobody  it is applied after the judgment that proposed it
+  prompt_edits_approved_by: human
+
+memory:
+  # MEMORY.md holds what applies to every change, and every agent reads it on every
+  # call. memory/repos/<name>.md and memory/specs/<capability>.md hold what applies
+  # to one child repository or capability; the PLAN and BUILD prompts point to
+  # them, so only the changes that touch that scope read them. Over a cap, the next
+  # cycle and visual session are told to trim that file first.
+  max_chars: 12000 # MEMORY.md
+  max_chars_per_scope: 6000 # each file under memory/
+
+# Application skills the cycle uses to verify and explore, for example
+# [live-qa-sweep]. Empty: gates and code reading.
+skills: []

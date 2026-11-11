@@ -1,0 +1,431 @@
+{{/* The pages of one change: its story, its files, its events and what a person can do in its
+     worktree, and the page of a round of gates. Each draws .Page, the struct its read returns
+     (internal/portal/page_changes.go). */}}
+
+{{/* One event in a list. dict: e (store.EventRecord), exec (bool: link the execution it names) */}}
+{{define "event_line"}}{{$e := .e}}
+<li class="list-row items-start gap-3 px-0 py-2.5 text-sm">
+  <span class="w-24 shrink-0 text-xs text-base-content/60 tabular-nums max-sm:w-14 max-sm:[&>time]:whitespace-normal">{{at $e.TS}}</span>
+  <div class="flex min-w-0 flex-col gap-0.5">
+    <span class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <a href="/events/{{$e.ID}}" class="w-fit hover:underline touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" title="The whole event, as it was recorded">{{template "event_name" $e.Payload}}</a>
+      {{if and .change $e.Change}}{{template "change_link" $e.Change}}{{end}}
+      {{if and .exec $e.ExecID}}<a href="{{execHref $e.ExecID}}" class="link link-hover text-xs touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center">its execution</a>{{end}}
+    </span>
+    {{with evdesc $e.Payload}}<span class="text-base-content/80">{{.}}</span>{{else}}<span class="truncate font-mono text-xs text-base-content/60">{{evctx $e.Payload 160}}</span>{{end}}
+  </div>
+</li>
+{{end}}
+
+{{/* A round of gates in one line, with the result of each gate. dict: r (store.GateRoundDetail), at (when the page was read) */}}
+{{define "gate_round_line"}}{{$r := .r}}
+<div class="flex flex-col gap-1 text-sm">
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+    <a class="link link-hover font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/gates/{{$r.ID}}">Gates #{{$r.ID}}</a>
+    {{if $r.Result}}{{state "gate_rounds.result" $r.Result}}{{else}}{{badge "running" "info"}}{{end}}
+    <span class="text-xs text-base-content/60">{{(word "gate_rounds.context" $r.Context).Text}} · {{at $r.StartedAt}} · <span class="tabular-nums">{{took $r.StartedAt $r.FinishedAt .at}}</span></span>
+  </div>
+  {{if $r.Runs}}
+  <ul class="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+    {{range $r.Runs}}<li class="flex items-center gap-1">{{if eq .ExitCode 0}}{{iconc "circle-check" "size-3.5 shrink-0 text-success"}}{{else}}{{iconc "octagon-alert" "size-3.5 shrink-0 text-error"}}{{end}}<span class="font-mono">{{.RepoName}} · {{.GateName}}</span>{{if ne .ExitCode 0}}<span class="text-error">failed</span>{{end}}</li>{{end}}
+  </ul>
+  {{end}}
+</div>
+{{end}}
+
+{{/* The questions put to the evaluator, one a line. Takes []store.Evaluation. */}}
+{{define "evaluation_lines"}}
+<ul class="flex flex-col gap-1">
+  {{range .}}<li class="flex flex-wrap items-center gap-2 text-sm">{{iconc "scale" "size-3.5 shrink-0 text-base-content/60"}}<span>The evaluator on <b>{{label .Gate}}</b></span>{{state "evaluations.status" .Status}}<span class="text-xs text-base-content/60">{{with .Mode}}{{.}} · {{end}}{{if .Cached}}answered from the cache{{else}}{{usd .CostUSD}}{{end}}</span></li>{{end}}
+</ul>
+{{end}}
+
+{{/* Where a change is in the pipeline. Takes *changeHead. */}}
+{{define "change_rail"}}{{$at := .Stage}}{{$state := .State}}
+<ol class="mb-5 grid grid-cols-2 gap-1 text-xs font-medium uppercase tracking-wider sm:grid-cols-5" aria-label="Where the change is in the pipeline">
+  {{range $i, $st := list "Queued" "Building" "Ready" "Merging" "Integrated"}}{{$k := add $i 1}}
+  <li class="flex items-center gap-2 px-3 py-2 {{if eq $k $at}} bg-primary text-primary-content {{else if lt $k $at}} bg-base-100 text-base-content {{else}} bg-base-100/40 text-base-content/60 {{end}} sm:[clip-path:polygon(0_0,calc(100%-10px)_0,100%_50%,calc(100%-10px)_100%,0_100%,10px_50%)] sm:first:[clip-path:polygon(0_0,calc(100%-10px)_0,100%_50%,calc(100%-10px)_100%,0_100%)]"{{if eq $k $at}} aria-current="step"{{end}}>
+    {{if lt $k $at}}{{iconc "check" "size-3 shrink-0"}}{{else if eq $k 1}}{{iconc "inbox" "size-3 shrink-0"}}{{else if eq $k 2}}{{iconc "hammer" "size-3 shrink-0"}}{{else if eq $k 3}}{{iconc "package-check" "size-3 shrink-0"}}{{else if eq $k 4}}{{iconc "git-merge" "size-3 shrink-0"}}{{else}}{{iconc "archive" "size-3 shrink-0"}}{{end}}<span>{{$st}}</span>
+    {{if and (eq $k $at) (eq $state "blocked")}}<span class="badge badge-sm badge-error normal-case tracking-normal">blocked</span>{{end}}
+    {{if and (eq $k $at) (eq $state "rebuild_requested")}}<span class="badge badge-sm badge-warning normal-case tracking-normal">again</span>{{end}}
+  </li>
+  {{end}}
+</ol>
+{{end}}
+
+{{/* What every page of a change shows above its tabs. Takes the pageView; the change is .Page.Change. */}}
+{{define "change_top"}}{{$c := .Page.Change}}{{$n := enc $c.ChangeName}}
+<header class="mb-4 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0">
+    <h1 class="break-all font-display text-2xl font-bold sm:text-3xl">{{$c.ChangeName}}</h1>
+    <div id="change-state" data-live-region class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      {{state "changes.state" $c.State}}
+      <span class="text-base-content/80">{{(word "changes.state" $c.State).Means}}</span>
+    </div>
+    <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-base-content/70">
+      {{if eq $c.Priority "critical"}}<span class="badge badge-sm badge-error">critical priority</span>{{else if eq $c.Priority "high"}}<span class="badge badge-sm badge-warning">high priority</span>{{else if $c.Priority}}<span class="badge badge-sm badge-ghost">{{$c.Priority}} priority</span>{{end}}
+      <span>last activity {{at $c.LastActivityAt}}</span>
+      {{with $c.IntegratedCommit}}<span>commit <code class="font-mono text-xs">{{printf "%.10s" .}}</code></span>{{end}}
+    </div>
+    {{with $c.Description}}<div class="mt-2 max-w-3xl">{{template "clamped" .}}</div>{{end}}
+  </div>
+  <div id="change-action" data-live-region class="flex flex-wrap gap-2">
+    {{if $c.Lost}}{{template "reclaim_btn" (dict "name" $c.ChangeName "primary" true)}}
+    {{else if and (eq $c.State "ready") (not $c.Stopped)}}{{template "merge_btn" .Paused}}{{end}}
+  </div>
+</header>
+
+<div id="change-stopped" data-live-region>
+{{if $c.Stopped}}
+<div role="alert" class="alert alert-vertical mb-5 items-start border-error/60 bg-error/10 sm:alert-horizontal">
+  {{iconc "octagon-alert" "size-6 text-error"}}
+  <div class="flex min-w-0 flex-col gap-2 text-start text-base-content">
+    <h2 class="font-display text-lg font-semibold">{{if $c.Block}}It waits for you: {{label $c.Block.Reason}}{{else}}It waits for you: an agent asked a question{{end}}</h2>
+    {{with $c.Block}}<p class="text-sm">Blocked {{at .BlockedAt}}{{with .Stage}}, at the {{label .}} stage{{end}}. The kit retried it {{times .Quarantine.Retries}} and rebuilt it {{times .Quarantine.Rebuilds}} before.{{if .Quarantine.ApprovedRisk}} Its risk is accepted.{{end}}</p>{{end}}
+    {{with $c.NeedsHuman}}<p class="text-sm"><b>Question for a person:</b> {{.}}</p><p class="text-sm text-base-content/70">Answer it in the worktree: send a prompt to an agent from Intervene, or edit the files by hand. Then unblock.</p>{{end}}
+    {{with $c.Block}}{{with .Details}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-2 text-sm font-medium touch:py-3">Show why it was blocked</summary><div class="collapse-content"><pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{{.}}</pre></div></details>{{end}}{{end}}
+    {{template "unblock_btns" (dict "name" $c.ChangeName "primary" true "reason" (and $c.Block $c.Block.Reason))}}
+  </div>
+</div>
+{{end}}
+{{with $c.Lost}}
+<div role="alert" class="alert alert-vertical mb-5 items-start border-warning/60 bg-warning/10 sm:alert-horizontal">
+  {{iconc "triangle-alert" "size-6 text-warning"}}
+  <div class="flex min-w-0 flex-col gap-1 text-start text-base-content">
+    <h2 class="font-display text-lg font-semibold">Its worker is gone</h2>
+    <p class="text-sm">The run that started {{at .StartedAt}} is still open, and nothing holds the lease of the change{{with .LeaseExpiredAt}}: it ran out {{at .}}{{end}}. Reclaim it and the dispatcher takes the change again.</p>
+  </div>
+</div>
+{{end}}
+</div>
+
+<div id="change-facts" data-live-region class="mb-5 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+  <div>
+    <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Depends on</h2>
+    {{if $c.DependsOn}}<ul class="flex flex-col gap-1">{{range $c.DependsOn}}<li class="flex flex-wrap items-center gap-2">{{template "change_link" .ChangeName}}{{state "changes.state" .State}}</li>{{end}}</ul>{{else}}<p class="text-base-content/60">no other change</p>{{end}}
+  </div>
+  <div>
+    <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Needed by</h2>
+    {{if $c.NeededBy}}<ul class="flex flex-col gap-1">{{range $c.NeededBy}}<li class="flex flex-wrap items-center gap-2">{{template "change_link" .ChangeName}}{{state "changes.state" .State}}</li>{{end}}</ul>{{else}}<p class="text-base-content/60">no other change</p>{{end}}
+  </div>
+  <div>
+    <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Locks it declares</h2>
+    {{if $c.Locks}}<ul class="flex flex-wrap gap-1.5">{{range $c.Locks}}<li><code class="badge badge-sm badge-ghost font-mono">{{.}}</code></li>{{end}}</ul>{{else}}<p class="text-base-content/60">none</p>{{end}}
+  </div>
+  <div>
+    <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Work so far</h2>
+    <p class="tabular-nums">{{count $c.Runs "worker run" "worker runs"}} · {{count $c.Executions "execution" "executions"}} · {{count $c.Repairs "repair" "repairs"}}</p>
+    <p><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/executions?change={{qenc $c.ChangeName}}">Its executions</a></p>
+  </div>
+  {{if or $c.Facts $c.Idle $c.Rebuild $c.Merge $c.Manifest}}
+  <div class="sm:col-span-2 xl:col-span-4">
+    <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Right now</h2>
+    <ul class="flex flex-col gap-1">
+      {{with $c.Idle}}<li class="flex items-start gap-x-3">{{iconc "hourglass" "mt-0.5 size-4 shrink-0 text-warning"}}<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><span>Its agent, {{.Engine}}, shows no activity.</span>{{template "idle_now" .}}<a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .ExecID}}">its execution</a></div></li>{{end}}
+      {{with $c.Merge}}<li class="flex items-start gap-x-3">{{iconc "git-merge" "mt-0.5 size-4 shrink-0 text-info"}}<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><span>The merger is on it since {{at .StartedAt}}:</span>{{state "merge_attempts.state" .State}}</div></li>{{end}}
+      {{if and $c.Manifest (not $c.Merge)}}{{with $c.Manifest}}<li class="flex items-start gap-x-3">{{iconc "package-check" "mt-0.5 size-4 shrink-0 text-success"}}<span>Handed to the merger {{at .EnqueuedAt}} at <code class="font-mono text-xs">{{printf "%.10s" .HeadSHA}}</code>.</span></li>{{end}}{{end}}
+      {{with $c.Rebuild}}<li class="flex items-start gap-x-3">{{iconc "rotate-ccw" "mt-0.5 size-4 shrink-0 text-warning"}}<span>The merger asked {{at .RequestedAt}} for it to be built again{{with .Reason}} ({{label .}}){{end}}; no worker has taken it yet.</span></li>{{end}}
+      {{range $c.Facts}}
+      <li class="flex items-start gap-x-3">{{iconc "circle-pause" "mt-0.5 size-4 shrink-0 text-base-content/60"}}
+        <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {{if eq .Kind "dependency"}}<span>It waits for {{template "change_ref" .OtherChange}}, which is</span>{{state "changes.state" .OtherState}}
+        {{else if eq .Kind "lock"}}<span>It declares the lock <code class="font-mono text-xs">{{.LockName}}</code>, and so does {{template "change_ref" .OtherChange}}, which is</span>{{state "changes.state" .OtherState}}
+        {{else if eq .Kind "deferral"}}<span>No engine of the role <b>{{.Reason}}</b> could take it {{at .Since}}{{if .Until}}; it is tried again {{at .Until}}{{end}}.</span>
+        {{else if eq .Kind "block"}}<span>It is blocked since {{at .Since}}: {{label .Reason}}.</span>
+        {{else}}<span>{{.Kind}}</span>{{end}}
+        </div>
+      </li>
+      {{end}}
+    </ul>
+  </div>
+  {{end}}
+</div>
+
+{{template "change_rail" $c}}
+{{template "page_tabs" (dict "tabs" $c.Tabs "active" $c.Tab)}}
+{{end}}
+
+{{/* One episode of the story of a change. dict: ep (episodeView), at (when the page was read) */}}
+{{define "episode"}}{{$e := .ep}}{{$at := .at}}
+{{if eq $e.Kind "run"}}{{with $e.Run}}
+<article id="run-{{.ID}}" class="card card-border bg-base-100">
+  <div class="card-body gap-3 p-4">
+    <header class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h3 class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "hammer" "size-4 text-primary"}}Worker run #{{.ID}}</h3>
+      {{if .Result}}{{state "change_runs.result" .Result}}{{else}}{{badge "running" "info"}}{{end}}
+      <span class="text-sm text-base-content/70">{{(word "change_runs.origin" .Origin).Text}} · started {{at .StartedAt}} · {{if .FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took .StartedAt .FinishedAt $at}}</span></span>
+    </header>
+    {{with (word "change_runs.result" .Result).Means}}<p class="text-sm text-base-content/80">{{.}}</p>{{end}}
+    {{if $e.Steps}}
+    <ol class="flex flex-col gap-3">
+      {{range $e.Steps}}
+      <li class="flex flex-col gap-1.5 border-l-2 border-base-content/15 pl-3">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <a class="link link-hover font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .ExecID}}">{{.Name}}</a>
+          {{state "executions.status" .Status}}
+          {{with .EnginesTried}}<span class="flex flex-wrap items-center gap-1.5 text-base-content/80">{{template "engines_tried" .}}</span>{{end}}
+          <span class="text-xs text-base-content/60">{{at .StartedAt}} · {{if .FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took .StartedAt .FinishedAt $at}}</span></span>
+        </div>
+        {{if .OwnerGone}}<p class="text-xs text-warning">The process that ran it is gone: it ended without recording how.</p>{{end}}
+        {{range .Attempts}}{{$engine := .Engine}}{{range .IdlePeriods}}<p class="text-xs text-base-content/70">{{$engine}} showed no activity for <b class="tabular-nums">{{seconds .Seconds}}</b> from {{clock .StartedAt}}: {{if .EndedBy}}{{(word "attempt_idle_periods.ended_by" .EndedBy).Text}}{{else}}idle now, stopped at {{seconds .LimitSeconds}}{{end}}.</p>{{end}}{{end}}
+        {{with .Repair}}<p class="text-sm">Repair round {{.RoundNo}}, asked because of <b>{{label .AskedReason}}</b>: {{if .ResultPassed}}{{badge "the gates passed afterwards" "success"}}{{else}}{{badge "not fixed" "error"}}{{with .ResultNextReason}} <span class="text-base-content/70">then {{label .}}</span>{{end}}{{end}}</p>{{end}}
+        {{range .Rounds}}{{template "gate_round_line" (dict "r" . "at" $at)}}{{end}}
+        {{with .Evaluations}}{{template "evaluation_lines" .}}{{end}}
+      </li>
+      {{end}}
+    </ol>
+    {{else}}<p class="text-sm text-base-content/60">It ran no agent.</p>{{end}}
+    {{range $e.Rounds}}{{template "gate_round_line" (dict "r" . "at" $at)}}{{end}}
+    {{with $e.Evaluations}}{{template "evaluation_lines" .}}{{end}}
+    {{range .Deferrals}}<p class="text-sm">{{iconc "circle-pause" "size-3.5 inline text-base-content/60"}} No engine of the role <b>{{.Role}}</b> could take it {{at .DeferredAt}}{{if .RetryAt}}; tried again {{at .RetryAt}}{{end}}.</p>{{end}}
+  </div>
+</article>
+{{end}}
+
+{{else if eq $e.Kind "merge"}}{{with $e.Merge}}
+<article id="merge-{{.ID}}" class="card card-border bg-base-100">
+  <div class="card-body gap-3 p-4">
+    <header class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h3 class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "git-merge" "size-4 text-primary"}}Merge attempt #{{.ID}}</h3>
+      {{if .Result}}{{state "merge_attempts.result" .Result}}{{else}}{{state "merge_attempts.state" .State}}{{end}}
+      <span class="text-sm text-base-content/70">started {{at .StartedAt}} · {{if .FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took .StartedAt .FinishedAt $at}}</span></span>
+    </header>
+    {{with (word "merge_attempts.result" .Result).Means}}<p class="text-sm text-base-content/80">{{.}}</p>{{end}}
+    {{with .ResultReason}}<p class="text-sm"><b>Why:</b> <span class="break-words">{{.}}</span></p>{{end}}
+    {{if and .Result (ne .State "COMPLETED")}}<p class="text-sm text-base-content/70">It got as far as {{(word "merge_attempts.state" .State).Text}}.</p>{{end}}
+    {{with .IntegratedCommit}}<p class="text-sm">Integrated as <code class="font-mono text-xs">{{printf "%.10s" .}}</code>.</p>{{end}}
+    {{range .GateRounds}}{{template "gate_round_line" (dict "r" . "at" $at)}}{{end}}
+    {{with .Evaluations}}{{template "evaluation_lines" .}}{{end}}
+    {{with .Pushes}}<p class="text-sm">Pushed: {{range $i, $p := .}}{{if $i}}, {{end}}<code class="font-mono text-xs">{{$p.RepoPath}}</code> at <code class="font-mono text-xs">{{printf "%.10s" $p.PushedSHA}}</code>{{end}}.</p>{{end}}
+  </div>
+</article>
+{{end}}
+
+{{else if eq $e.Kind "manifest"}}{{with $e.Manifest}}
+<article id="manifest-{{.ID}}" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-box border border-base-content/10 bg-base-100 px-4 py-3 text-sm">
+  {{iconc "package-check" "size-4 shrink-0 text-success"}}
+  <span><b>Handed to the merger</b> {{at .EnqueuedAt}} at <code class="font-mono text-xs">{{printf "%.10s" .HeadSHA}}</code>{{with .Capabilities}}, touching {{range $i, $c := .}}{{if $i}}, {{end}}<code class="font-mono text-xs">{{$c}}</code>{{end}}{{end}}.</span>
+  {{if .Outcome}}{{state "ready_manifests.outcome" .Outcome}}<span class="text-xs text-base-content/60">{{at .ClosedAt}}</span>{{else}}{{badge "waiting for the merger" "info"}}{{end}}
+</article>
+{{end}}
+
+{{else if eq $e.Kind "block"}}{{with $e.Block}}
+<article id="block-{{.ID}}" class="card card-border bg-base-100">
+  <div class="card-body gap-2 p-4">
+    <header class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h3 class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "octagon-alert" "size-4 text-error"}}Blocked: {{label .Reason}}</h3>
+      {{if .Resolution}}{{state "change_blocks.resolution" .Resolution}}{{else}}{{badge "in force" "error"}}{{end}}
+      <span class="text-sm text-base-content/70">{{at .BlockedAt}}{{with .Stage}} · at the {{label .}} stage{{end}}{{if .RetryNum}} · after {{.RetryNum}} retries{{end}}</span>
+    </header>
+    {{if .ResolvedAt}}<p class="text-sm text-base-content/80">{{(word "change_blocks.resolution" .Resolution).Text}} {{at .ResolvedAt}}{{with .ResolvedBy}}, by {{.}}{{end}}.{{with (word "change_blocks.resolution" .Resolution).Means}} {{.}}{{end}}</p>{{end}}
+    {{with .Details}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-2 text-sm font-medium touch:py-3">Show why</summary><div class="collapse-content"><pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{{.}}</pre></div></details>{{end}}
+  </div>
+</article>
+{{end}}
+
+{{else if eq $e.Kind "rebuild"}}{{with $e.Rebuild}}
+<article id="rebuild-{{.ID}}" class="card card-border bg-base-100">
+  <div class="card-body gap-2 p-4">
+    <header class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h3 class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "rotate-ccw" "size-4 text-warning"}}The merger asked to build it again</h3>
+      {{if .ConsumedAt}}{{badge "taken by a worker" "success"}}{{else}}{{badge "not taken yet" "warning"}}{{end}}
+      <span class="text-sm text-base-content/70">{{at .RequestedAt}} · rebuild {{.RebuildNum}}{{with .Reason}} · {{label .}}{{end}}</span>
+    </header>
+    {{with .ConflictDetails}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-2 text-sm font-medium touch:py-3">Show what conflicted</summary><div class="collapse-content"><pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{{.}}</pre></div></details>{{end}}
+  </div>
+</article>
+{{end}}
+
+{{else if eq $e.Kind "approval"}}{{with $e.Approval}}
+<article id="approval-{{.ID}}" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-box border border-base-content/10 bg-base-100 px-4 py-3 text-sm">
+  {{iconc "shield-check" "size-4 shrink-0 text-success"}}
+  <span><b>Risk accepted</b> by {{.ApprovedBy}} {{at .ApprovedAt}}.</span>
+  {{if .RevokedAt}}{{badge "withdrawn" "warning"}}<span class="text-xs text-base-content/60">{{at .RevokedAt}}{{with .RevokeReason}} · {{label .}}{{end}}</span>{{end}}
+</article>
+{{end}}
+
+{{else if eq $e.Kind "deferral"}}{{with $e.Deferral}}
+<article id="deferral-{{.ID}}" class="flex flex-col gap-2 rounded-box border border-base-content/10 bg-base-100 px-4 py-3 text-sm">
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+    {{iconc "circle-pause" "size-4 shrink-0 text-base-content/60"}}
+    <span><b>No engine of the role {{.Role}} could take it</b> {{at .DeferredAt}}{{if .RetryAt}}; tried again {{at .RetryAt}}{{end}}.</span>
+    {{if .ClearedAt}}<span class="text-xs text-base-content/60">cleared {{at .ClearedAt}}</span>{{else}}{{badge "still waiting" "warning"}}{{end}}
+  </div>
+  {{with .OutputTail}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-2 text-sm font-medium touch:py-3">Show what the engines said</summary><div class="collapse-content"><pre class="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{{.}}</pre></div></details>{{end}}
+</article>
+{{end}}
+
+{{else if eq $e.Kind "gates"}}{{with $e.Gates}}
+<article id="gates-{{.ID}}" class="rounded-box border border-base-content/10 bg-base-100 px-4 py-3">
+  {{template "gate_round_line" (dict "r" . "at" $at)}}
+</article>
+{{end}}
+
+{{else if eq $e.Kind "evaluation"}}{{with $e.Evaluation}}
+<article id="evaluation-{{.ID}}" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-box border border-base-content/10 bg-base-100 px-4 py-3 text-sm">
+  {{iconc "scale" "size-4 shrink-0 text-base-content/60"}}
+  <span>The evaluator on <b>{{label .Gate}}</b></span>{{state "evaluations.status" .Status}}
+  <span class="text-xs text-base-content/60">{{at .CreatedAt}}{{with .Mode}} · {{.}}{{end}} · {{if .Cached}}answered from the cache{{else}}{{usd .CostUSD}}{{end}}</span>
+</article>
+{{end}}
+
+{{else if eq $e.Kind "execution"}}{{with $e.Execution}}
+<article id="execution-{{.ExecID}}" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-box border border-base-content/10 bg-base-100 px-4 py-3 text-sm">
+  {{if eq .Kind "portal_run"}}{{iconc "bot" "size-4 shrink-0 text-primary"}}{{else}}{{iconc "workflow" "size-4 shrink-0 text-primary"}}{{end}}
+  <a class="link link-hover min-w-0 font-medium touch:py-3" href="{{execHref .ExecID}}">{{execName .Execution}}{{if eq .Kind "portal_run"}}: {{or (firstLine .Summary) (firstLine .PromptText)}}{{end}}</a>
+  {{state "executions.status" .Status}}
+  <span class="text-xs text-base-content/60">{{at .StartedAt}} · {{if .FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took .StartedAt .FinishedAt $at}}</span></span>
+</article>
+{{end}}
+{{end}}
+{{end}}
+
+{{define "change_story"}}{{$p := .Page}}
+{{template "change_top" .}}
+<div id="change-story" data-live-region class="flex flex-col gap-4 rounded-b-box rounded-tr-box border border-base-content/10 bg-base-200/40 p-4 sm:p-6">
+  {{if $p.Episodes}}
+  <ol class="flex flex-col gap-4">
+    {{range $p.Episodes}}<li>{{template "episode" (dict "ep" . "at" $.ReadAt)}}</li>{{end}}
+  </ol>
+  {{else if $p.Newest}}{{template "empty" (dict "icon" "history" "title" "Nothing older than this." "text" "")}}
+  {{else}}{{template "empty" (dict "icon" "history" "title" "Nothing has happened to this change yet." "text" "Its story starts when the dispatcher picks it up: its worker runs, their executions and gates, and the attempts of the merger appear here.")}}{{end}}
+  {{if or $p.Older $p.Newest}}
+  <nav class="flex flex-wrap items-center justify-between gap-3 text-sm" aria-label="Pages of the story">
+    {{if $p.Newest}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Newest}}">{{icon "chevrons-left"}}Latest</a>{{else}}<span></span>{{end}}
+    {{if $p.Older}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Older}}">Earlier{{icon "chevron-right"}}</a>{{else}}<span class="text-xs text-base-content/60">This is where its story starts.</span>{{end}}
+  </nav>
+  {{end}}
+</div>
+{{end}}
+
+{{define "change_files"}}{{$p := .Page}}{{$n := enc $p.Change.ChangeName}}
+{{template "change_top" .}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100 p-4">
+  {{if $p.Files}}
+  <p class="mb-3 text-sm text-base-content/70">{{if eq $p.Source "worktree"}}Read from the worktree of the change: what its worker is writing now.{{else if eq $p.Source "archived"}}Read from the archive of the workspace: the change is integrated.{{else}}Read from openspec/changes in the workspace.{{end}}</p>
+  <div class="grid gap-4 lg:grid-cols-12">
+    <nav class="min-w-0 lg:col-span-3" aria-label="Files of this change">
+      <ul class="menu menu-sm w-full rounded-box bg-base-200">
+        {{range $p.Files}}<li><a href="/changes/{{$n}}/files/{{encpath .Name}}" class="touch:min-h-11{{if and $p.File (eq .Name $p.File.Name)}} menu-active{{end}}"{{if and $p.File (eq .Name $p.File.Name)}} aria-current="page"{{end}}>{{icon "file-code"}}<span class="flex min-w-0 flex-col"><span class="truncate font-mono">{{.Name}}</span><span class="text-xs opacity-70">{{bytes .Size}}</span></span></a></li>{{end}}
+      </ul>
+    </nav>
+    <div class="min-w-0 lg:col-span-9">
+      {{with $p.File}}{{template "viewer" (dict "c" (dict "content" .Content "size" .Size "truncated" .Truncated) "name" .Name "full" $p.Whole)}}{{end}}
+    </div>
+  </div>
+  {{else}}{{template "empty" (dict "icon" "file-code" "title" "This change has no OpenSpec files on disk." "text" "It has no worktree, it is not in openspec/changes and it is not archived, so there is no proposal, design or task list to show.")}}{{end}}
+</div>
+{{end}}
+
+{{define "change_events"}}{{$p := .Page}}{{$n := enc $p.Change.ChangeName}}
+{{template "change_top" .}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100 p-4">
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <p class="text-sm text-base-content/70">What the orchestrator recorded about this change, as it recorded it. Its story tells the same from its rows.</p>
+    {{if $p.Types}}
+    <form method="get" action="/changes/{{$n}}/events" class="flex items-center gap-2">
+      <label class="sr-only" for="events-type">Type of event</label>
+      <select id="events-type" name="event" class="select select-sm w-64 max-w-full touch:min-h-11" data-autosubmit>
+        <option value="">Every type ({{$p.Total}})</option>
+        {{range $p.Types}}<option value="{{.Event}}"{{if eq .Event $p.Event}} selected{{end}}>{{.Event}} ({{.Count}})</option>{{end}}
+      </select>
+      <noscript><button type="submit" class="btn btn-sm">Filter</button></noscript>
+    </form>
+    {{end}}
+  </div>
+  {{if $p.Items}}
+  <ul class="list">
+    {{range $p.Items}}{{template "event_line" (dict "e" . "exec" true)}}{{end}}
+  </ul>
+  {{else if $p.Event}}{{template "empty" (dict "icon" "radio-tower" "title" "No event of this type." "text" "Pick another type, or every type.")}}
+  {{else}}{{template "empty" (dict "icon" "radio-tower" "title" "No event of this change has been recorded." "text" "")}}{{end}}
+  {{if or $p.Older $p.Newest}}
+  <nav class="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-base-content/10 pt-3 text-sm" aria-label="Pages of the events">
+    {{if $p.Newest}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Newest}}">{{icon "chevrons-left"}}Latest</a>{{else}}<span></span>{{end}}
+    {{if $p.Older}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Older}}">Older{{icon "chevron-right"}}</a>{{else}}<span class="text-xs text-base-content/60">These are the oldest.</span>{{end}}
+  </nav>
+  {{end}}
+</div>
+{{end}}
+
+{{define "change_intervene"}}{{$p := .Page}}{{$c := $p.Change}}{{$n := enc $c.ChangeName}}
+{{template "change_top" .}}
+<div class="flex flex-col gap-6 rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100 p-4 sm:p-6">
+  {{if $c.HasWorktree}}
+  <div class="grid gap-6 lg:grid-cols-12">
+    <section class="min-w-0 lg:col-span-8" aria-labelledby="agent-title">
+      <h2 id="agent-title" class="mb-1 flex items-center gap-2 font-display text-base font-semibold">{{iconc "bot" "size-4 text-primary"}}Send a prompt to an agent in the worktree</h2>
+      <p class="mb-3 text-sm text-base-content/70">The agent works in the worktree of this change, on its branch. It runs in the background; the next page follows its output.</p>
+      <form method="post" data-api="/api/changes/{{$n}}/prompts" data-toast="Agent started" class="fieldset gap-3">
+        <label class="label" for="intervene-engine">Agent</label>
+        <select id="intervene-engine" name="engine" class="select w-full touch:min-h-11 sm:w-96">{{template "engine_options" (dict "engines" $p.Engines "sel" $p.Default)}}</select>
+        <label class="label" for="intervene-prompt">Prompt{{if eq $p.From "plan"}} (the PLAN prompt a worker would get now: edit it freely){{else if eq $p.From "build"}} (the BUILD prompt a worker would get now: edit it freely){{else if $p.From}} (the prompt of an earlier execution: edit it freely){{end}}</label>
+        <textarea id="intervene-prompt" name="prompt" required rows="{{if $p.Prompt}}16{{else}}6{{end}}" class="textarea validator w-full font-mono text-sm" placeholder="Fix the failing unit test and explain the root cause.">{{$p.Prompt}}</textarea>
+        <p class="validator-hint hidden">Write the instruction for the agent.</p>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button type="submit" class="btn btn-primary btn-sm touch:min-h-11">{{icon "send"}}Run in the background</button>
+          <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-base-content/70"><span>Start from the prompt a worker would get now:</span><a class="btn btn-sm btn-ghost touch:min-h-11" href="/changes/{{$n}}/intervene?from=plan">PLAN</a><a class="btn btn-sm btn-ghost touch:min-h-11" href="/changes/{{$n}}/intervene?from=build">BUILD</a></span>
+        </div>
+      </form>
+    </section>
+    <section class="min-w-0 lg:col-span-4" aria-labelledby="tools-title">
+      <h2 id="tools-title" class="mb-3 flex items-center gap-2 font-display text-base font-semibold">{{iconc "wrench" "size-4 text-primary"}}In the worktree</h2>
+      <div class="flex flex-col gap-2">
+        <button class="btn btn-sm justify-start touch:min-h-11" data-post="/api/changes/{{$n}}/validate" data-title="Validation of the specs of {{$c.ChangeName}}">{{icon "shield-check"}}Validate the specs</button>
+        <button class="btn btn-sm justify-start touch:min-h-11" data-post="/api/changes/{{$n}}/gates" data-toast="Gates started">{{icon "flask-conical"}}Run the gates</button>
+        <button class="btn btn-sm justify-start touch:min-h-11" data-post="/api/changes/{{$n}}/reset" data-danger="1" data-confirm="Remove the worktree of {{$c.ChangeName}}, its branch, its place in the merge queue, its block and its counters? The change starts again from the backlog, and what its worker built is lost." data-confirm-title="Reset the worker of {{$c.ChangeName}}?" data-confirm-ok="Reset it" data-toast="Reset {{$c.ChangeName}}">{{icon "trash-2"}}Reset the worker…</button>
+      </div>
+    </section>
+  </div>
+  {{else}}
+  <div role="alert" class="alert alert-soft">{{icon "info"}}<span>This change has no worktree now, so there is nothing to work in: a worktree exists while the change is being built and until it is integrated. To run an agent at the root of the workspace, start a <a href="/executions/new" class="link">new agent run</a>.</span></div>
+  {{end}}
+
+  <section aria-labelledby="sent-title">
+    <h2 id="sent-title" class="mb-3 flex items-center gap-2 font-display text-base font-semibold">{{iconc "terminal" "size-4 text-primary"}}Prompts sent to this worktree</h2>
+    {{if $p.Sent}}
+    <ul class="list rounded-box border border-base-content/10">
+      {{range $p.Sent}}{{template "exec_line" (dict "row" (execRow .) "at" $.ReadAt)}}{{end}}
+    </ul>
+    {{else}}<p class="text-sm text-base-content/60">No prompt was sent from the portal to this worktree.</p>{{end}}
+  </section>
+</div>
+{{end}}
+
+{{define "gate_round"}}{{$p := .Page}}
+<header id="gates-head" data-live-region class="mb-5">
+  <p class="text-xs font-medium uppercase tracking-wider text-base-content/60">{{(word "gate_rounds.context" $p.Context).Text}}</p>
+  <h1 class="mt-1 font-display text-2xl font-bold sm:text-3xl">Gates #{{$p.ID}}{{with $p.ChangeName}} · <span class="break-all">{{.}}</span>{{end}}</h1>
+  <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+    {{if $p.Result}}{{state "gate_rounds.result" $p.Result}}{{else}}{{badge "running" "info"}}<span class="loading loading-dots loading-sm text-info" aria-hidden="true"></span>{{end}}
+    <span class="text-base-content/70">{{count (len $p.Runs) "gate" "gates"}}, {{$p.Failed}} failed · started {{at $p.StartedAt}} · {{if $p.FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took $p.StartedAt $p.FinishedAt $.ReadAt}}</span></span>
+  </div>
+  <dl class="mt-3 grid max-w-3xl grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+    {{with $p.ChangeName}}<dt class="text-base-content/70">Change</dt><dd>{{template "change_link" .}}</dd>{{end}}
+    {{with $p.AfterExecID}}<dt class="text-base-content/70">Verifies</dt><dd><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .}}">the work of this execution</a></dd>{{end}}
+    {{if $p.ChangeRunID}}<dt class="text-base-content/70">Worker run</dt><dd><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/changes/{{enc $p.ChangeName}}#run-{{$p.ChangeRunID}}">#{{$p.ChangeRunID}}</a></dd>{{end}}
+    {{if $p.MergeAttemptID}}<dt class="text-base-content/70">Merge attempt</dt><dd><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/changes/{{enc $p.ChangeName}}#merge-{{$p.MergeAttemptID}}">#{{$p.MergeAttemptID}}</a></dd>{{end}}
+    {{with $p.BaseRef}}<dt class="text-base-content/70">Against</dt><dd><code class="break-all font-mono text-xs">{{.}}</code></dd>{{end}}
+    {{with $p.HeadSHA}}<dt class="text-base-content/70">At</dt><dd><code class="break-all font-mono text-xs">{{.}}</code></dd>{{end}}
+  </dl>
+</header>
+<div id="gates-runs" data-live-region class="flex flex-col gap-3">
+  {{range $p.Runs}}
+  <section class="card card-border bg-base-100" aria-label="{{.RepoName}} {{.GateName}}">
+    <div class="card-body gap-2 p-4">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {{if eq .ExitCode 0}}{{iconc "circle-check" "size-5 shrink-0 text-success"}}{{else}}{{iconc "octagon-alert" "size-5 shrink-0 text-error"}}{{end}}
+        <h2 class="font-mono text-sm font-semibold">{{.RepoName}} · {{.GateName}}</h2>
+        {{if eq .ExitCode 0}}{{badge "passed" "success"}}{{else}}{{badge "failed" "error"}}<span class="text-xs text-error">exit {{.ExitCode}}</span>{{end}}
+        <span class="text-xs text-base-content/60 tabular-nums">{{millis .DurationMS}}</span>
+      </div>
+      <p class="text-sm"><code class="break-all font-mono text-xs">{{.Command}}</code></p>
+      {{with .FailureExcerpt}}<pre class="max-h-96 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs whitespace-pre-wrap break-words">{{.}}</pre>{{end}}
+      {{with .LogFilePath}}<p class="text-xs text-base-content/60">Its whole output: <code class="break-all font-mono">{{.}}</code></p>{{end}}
+    </div>
+  </section>
+  {{else}}
+  <div class="card card-border bg-base-100">{{template "empty" (dict "icon" "flask-conical" "title" "No gate has reported yet." "text" "Each gate appears here when it ends.")}}</div>
+  {{end}}
+</div>
+{{end}}

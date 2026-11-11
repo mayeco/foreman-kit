@@ -1,0 +1,70 @@
+# ==============================================================================
+# .goreleaser.yaml - How a release of foreman-kit is built and published
+# ==============================================================================
+# A tag v<semver> pushed to GitHub runs .github/workflows/release.yml, which runs GoReleaser with
+# this file: it builds the static binary for macOS and Linux on amd64 and arm64, uploads each one to
+# the GitHub release as foreman-kit-<os>-<arch> (the names install.sh downloads), with
+# checksums.txt beside them, and the workflow then publishes the npm package from those binaries.
+#
+# Try it locally without publishing anything:
+#   goreleaser check
+#   goreleaser release --snapshot --clean      # builds into dist/release/, uploads nothing
+version: 2
+
+project_name: foreman-kit
+
+# Not dist/: scripts/build.sh and scripts/npm-pack.sh keep their output there, and --clean would
+# remove it.
+dist: dist/release
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: foreman-kit
+    main: ./cmd/foreman-kit
+    binary: foreman-kit
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # The version, the commit and the build time the binary reports (foreman-kit version); the
+    # kit's lock in an application records that version.
+    ldflags:
+      - -s -w
+      - -X github.com/mayeco/foreman-kit/internal/assets.Version={{ .Version }}
+      - -X github.com/mayeco/foreman-kit/internal/assets.SourceCommit={{ .ShortCommit }}
+      - -X github.com/mayeco/foreman-kit/internal/assets.BuiltAt={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  # The binaries themselves, not archives: install.sh and the npm package take them as they are.
+  - id: binaries
+    formats: [binary]
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: git
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore\\(memory\\):"
+
+release:
+  github:
+    owner: mayeco
+    name: foreman-kit
+  # A tag with a prerelease part (v4.1.0-rc.1) is published as a prerelease.
+  prerelease: auto
+  draft: false

@@ -1,0 +1,90 @@
+{{/* System → Prompt templates: the prompts of the application, one for each role of the kit. The
+     pages draw .Page, the structs their reads return (internal/portal/page_system.go): which
+     placeholders a role has, what the kit writes in the place of each and which of them a prompt
+     must write are the definitions of the kit, not a list kept here. */}}
+
+{{define "prompts"}}{{$p := .Page}}
+{{template "system_nav" .}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Prompt templates</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">The prompts of this application: the file an agent of each role is given on every call, with what the kit writes in the place of each placeholder. They are the application's own: edit a file, then commit it.</p>
+</header>
+{{if or $p.Errors $p.Warnings}}
+<section role="alert" class="alert alert-soft {{if $p.Errors}}alert-error{{else}}alert-warning{{end}} mb-5 items-start text-base-content" aria-labelledby="prompts-check-title">{{if $p.Errors}}{{iconc "octagon-alert" "size-4 shrink-0 text-error"}}{{else}}{{iconc "triangle-alert" "size-4 shrink-0 text-warning"}}{{end}}
+  <div class="min-w-0">
+    <h2 id="prompts-check-title" class="text-sm font-semibold">The check of the prompts found {{count (len $p.Errors) "error" "errors"}} and {{count (len $p.Warnings) "warning" "warnings"}}</h2>
+    <ul class="mt-1 flex flex-col gap-1 text-sm">
+      {{range $p.Errors}}<li class="break-words">{{.}}</li>{{end}}
+      {{range $p.Warnings}}<li class="break-words">{{.}}</li>{{end}}
+    </ul>
+  </div>
+</section>
+{{end}}
+<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+  {{range $p.Templates}}{{$role := upper .Role}}
+  <article class="card card-border min-w-0 bg-base-100" aria-labelledby="prompt-{{.Role}}-title">
+    <div class="card-body gap-3 p-4">
+      <div class="flex items-center justify-between gap-2">
+        <h2 id="prompt-{{.Role}}-title" class="card-title font-display tracking-wide">{{$role}}</h2>
+        {{if .Missing}}<span class="badge badge-sm badge-soft badge-error">{{iconc "octagon-alert" "size-3"}}missing</span>{{else}}<span class="badge badge-sm badge-outline font-mono" title="What the kit records with each call made with this prompt">{{.Version}}</span>{{end}}
+      </div>
+      <p class="break-words text-sm text-base-content/80">{{.About}}</p>
+      <code class="break-all font-mono text-xs text-base-content/70">{{.Path}}</code>
+      <div class="flex flex-wrap gap-1">
+        {{range .Placeholders}}{{if .Used}}<span class="badge badge-sm badge-ghost font-mono" title="{{.Holds}}">{{"{{"}}{{.Name}}{{"}}"}}</span>{{else if .Required}}<span class="badge badge-sm badge-soft badge-error font-mono" title="The prompt must write it: {{.Holds}}">{{iconc "octagon-alert" "size-3"}}{{"{{"}}{{.Name}}{{"}}"}} is missing</span>{{end}}{{end}}
+        {{range .Unknown}}<span class="badge badge-sm badge-soft badge-error font-mono" title="The kit does not fill it: it reaches the agent as it is written">{{iconc "octagon-alert" "size-3"}}{{"{{"}}{{.}}{{"}}"}} is unknown</span>{{end}}
+        {{if and (not .Placeholders) (not .Unknown)}}<span class="text-xs text-base-content/60">It takes no placeholder.</span>{{end}}
+      </div>
+      <div class="card-actions justify-end">
+        <a class="btn btn-sm touch:min-h-11" href="/system/prompts/{{enc .Role}}">{{icon "file-text"}}Template<span class="sr-only"> of {{$role}}</span></a>
+        <a class="btn btn-sm btn-ghost touch:min-h-11" href="/system/prompts/{{enc .Role}}?view=sample">{{icon "sparkles"}}Sample render<span class="sr-only"> of {{$role}}</span></a>
+      </div>
+    </div>
+  </article>
+  {{end}}
+</div>
+{{end}}
+
+{{define "prompt"}}{{$p := .Page}}
+{{template "system_nav" .}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">{{upper $p.Role}} prompt</h1>
+  <p class="mt-1 max-w-3xl break-words text-sm text-base-content/70">{{$p.About}}</p>
+  <p class="mt-1 text-sm text-base-content/70"><code class="break-all font-mono">{{$p.Path}}</code>{{if not $p.Missing}} · version <code class="font-mono">{{$p.Version}}</code>{{end}}</p>
+</header>
+{{if $p.Missing}}<div role="alert" class="alert alert-warning mb-4">{{icon "triangle-alert"}}<span><code class="font-mono">{{$p.Path}}</code> is missing from this checkout. An application gets it from the kit's seeds when the kit is installed: restore it, then commit it.</span></div>{{end}}
+
+{{if or $p.Placeholders $p.Unknown}}
+<section class="card card-border mb-5 min-w-0 bg-base-100" aria-labelledby="prompt-placeholders-title">
+  <div class="border-b border-base-content/10 px-4 py-3"><h2 id="prompt-placeholders-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "braces" "size-4 text-primary"}}What the kit writes in the place of each placeholder</h2></div>
+  <div class="max-w-full overflow-x-auto">
+    <table class="table table-stack">
+      <thead><tr><th>Placeholder</th><th>The kit writes</th><th>In this prompt</th></tr></thead>
+      <tbody>
+        {{range $p.Placeholders}}
+        <tr class="align-top">
+          <td class="whitespace-nowrap font-mono text-sm">{{"{{"}}{{.Name}}{{"}}"}}</td>
+          <td class="min-w-56 max-w-2xl break-words text-sm">{{.Holds}}</td>
+          <td class="text-sm">{{if .Used}}<span class="inline-flex items-center gap-1.5">{{iconc "circle-check" "size-4 shrink-0 text-success"}}written{{if .Required}}, as it must{{end}}</span>{{else if .Required}}<span class="inline-flex items-center gap-1.5 text-error">{{iconc "octagon-alert" "size-4 shrink-0"}}missing: the prompt must write it</span>{{else}}<span class="text-base-content/60">not written</span>{{end}}</td>
+        </tr>
+        {{end}}
+        {{range $p.Unknown}}
+        <tr class="align-top">
+          <td class="whitespace-nowrap font-mono text-sm">{{"{{"}}{{.}}{{"}}"}}</td>
+          <td class="min-w-56 max-w-2xl break-words text-sm text-error">Nothing: the kit does not know it, and it reaches the agent as it is written.</td>
+          <td class="text-sm"><span class="inline-flex items-center gap-1.5 text-error">{{iconc "octagon-alert" "size-4 shrink-0"}}written</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{end}}
+
+{{template "page_tabs" (dict "tabs" $p.Tabs "active" $p.View)}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100 p-4">
+  {{if $p.Missing}}{{template "empty" (dict "icon" "file-text" "title" "There is no file to show." "text" "The prompt of this role is missing from the application.")}}
+  {{else if eq $p.View "sample"}}{{template "viewer" (dict "c" (dict "content" $p.Sample) "name" (printf "%s.md" $p.Role) "md" "source" "id" "prompt-sample")}}
+  {{else}}{{template "viewer" (dict "c" (dict "content" $p.Raw) "name" (printf "%s.md" $p.Role) "md" "source" "id" "prompt-raw")}}{{end}}
+</div>
+{{end}}

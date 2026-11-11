@@ -1,0 +1,130 @@
+{{/* Cycles: what each cycle judged. The two pages draw .Page, the structs their reads return
+     (internal/portal/page_cycles.go): rows of the table of cycles, never a log read again. */}}
+
+{{/* How a cycle ended, or that it runs. Takes the cycle (store.Cycle). */}}
+{{define "cycle_outcome"}}{{$tone := cycleTone .Outcome}}
+<span class="badge badge-sm {{if eq $tone "success"}} badge-success {{else if eq $tone "error"}} badge-error {{else if eq $tone "warning"}} badge-warning {{else if eq $tone "info"}} badge-info {{else}} badge-ghost {{end}} h-auto min-h-5 whitespace-normal py-0.5 text-start">{{label .Outcome}}</span>
+{{end}}
+
+{{define "cycles"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Cycles</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">What each cycle judged: how it ended, the strategy it explored with, the engine that judged and how many findings it left. The latest first.</p>
+  </div>
+  <button class="btn btn-sm touch:min-h-11" data-post="/api/cycles" data-toast="Cycle started">{{icon "orbit"}}Run a cycle</button>
+</header>
+
+<div id="cycles-list" data-live-region class="card card-border min-w-0 bg-base-100">
+  {{if $p.Items}}
+  <div class="max-w-full overflow-x-auto">
+    <table class="table table-stack">
+      <thead><tr><th>Cycle</th><th>Outcome</th><th>Strategy</th><th>Judged by</th><th>Findings</th><th>Took</th></tr></thead>
+      <tbody>
+        {{range $p.Items}}
+        <tr class="align-top hover:bg-base-200/60">
+          <td>
+            <a class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/cycles/{{enc .Stamp}}">{{.Stamp}}</a>
+            <p class="mt-0.5 text-xs text-base-content/60">started {{at .StartedAt}}{{with .Trigger}} · {{(word "cycles.trigger" .).Text}}{{end}}</p>
+          </td>
+          <td class="max-w-xs">{{template "cycle_outcome" .}}</td>
+          <td class="text-sm">{{with .Strategy}}{{label .}}{{else}}<span class="text-base-content/60">{{if .FinishedAt}}none on record{{else}}not recorded yet{{end}}</span>{{end}}</td>
+          <td class="font-mono text-sm">{{with .JudgeEngine}}{{.}}{{else}}<span class="font-sans text-base-content/60">{{if .FinishedAt}}no engine on record{{else}}not recorded yet{{end}}</span>{{end}}</td>
+          <td class="tabular-nums">{{.FindingsCount}}</td>
+          <td class="whitespace-nowrap text-sm tabular-nums">{{if .FinishedAt}}{{took .StartedAt .FinishedAt $.ReadAt}}{{else}}running for {{took .StartedAt "" $.ReadAt}}{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}{{template "empty" (dict "icon" "orbit" "title" "No cycle is on record." "text" "The daemon runs one on its interval, and a person starts one with the button above.")}}{{end}}
+  {{template "older_newest" (dict "older" $p.Older "newest" $p.Newest)}}
+</div>
+{{end}}
+
+{{define "cycle"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0">
+    <p class="text-xs font-medium uppercase tracking-wider text-base-content/60">Cycle</p>
+    <h1 class="mt-1 break-all font-mono text-xl font-semibold sm:text-2xl">{{$p.Stamp}}</h1>
+    <div id="cycle-status" data-live-region class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      {{template "cycle_outcome" $p.Cycle}}
+      <span class="text-base-content/70">started {{at $p.StartedAt}}{{with $p.Trigger}}, {{(word "cycles.trigger" .).Text}}{{end}} · {{if $p.FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took $p.StartedAt $p.FinishedAt $.ReadAt}}</span></span>
+    </div>
+  </div>
+  {{if or $p.Older $p.Newer}}
+  <nav class="join" aria-label="The cycles next to this one">
+    {{if $p.Older}}<a class="btn btn-sm join-item touch:min-h-11" href="/cycles/{{enc $p.Older}}">{{icon "chevron-left"}}Older</a>{{end}}
+    {{if $p.Newer}}<a class="btn btn-sm join-item touch:min-h-11" href="/cycles/{{enc $p.Newer}}">Newer{{icon "chevron-right"}}</a>{{end}}
+  </nav>
+  {{end}}
+</header>
+
+<div class="flex flex-col gap-6">
+  <section id="cycle-facts" data-live-region class="card card-border bg-base-100 p-4" aria-labelledby="cycle-facts-title">
+    <h2 id="cycle-facts-title" class="sr-only">What the cycle recorded about itself</h2>
+    <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm">
+      <dt class="text-base-content/70">Strategy</dt><dd>{{with $p.Strategy}}{{label .}}{{else}}{{if $p.FinishedAt}}none on record{{else}}not recorded yet{{end}}{{end}}</dd>
+      <dt class="text-base-content/70">Judged by</dt><dd>{{with $p.JudgeEngine}}<span class="font-mono">{{.}}</span>{{else}}{{if $p.FinishedAt}}no engine on record{{else}}not recorded yet{{end}}{{end}}</dd>
+      <dt class="text-base-content/70">Findings</dt><dd class="tabular-nums">{{$p.FindingsCount}}</dd>
+      {{with $p.UmbrellaSHA}}<dt class="text-base-content/70">On commit</dt><dd><code class="font-mono text-xs">{{printf "%.10s" .}}</code></dd>{{end}}
+      <dt class="text-base-content/70">Events</dt><dd><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/events?cycle_stamp={{qenc $p.Stamp}}">What the orchestrator recorded during it</a></dd>
+    </dl>
+  </section>
+
+  <section id="cycle-executions" data-live-region class="card card-border min-w-0 bg-base-100" aria-labelledby="cycle-executions-title">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="cycle-executions-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "terminal" "size-4 text-primary"}}Its judgment</h2></div>
+    {{if $p.Rows}}
+    <ul class="list">{{range $p.Rows}}{{template "exec_line" (dict "row" . "at" $.ReadAt)}}{{end}}</ul>
+    <p class="border-t border-base-content/10 px-4 py-3 text-xs text-base-content/60">The prompt the judge was given and what it printed are in its execution.</p>
+    {{else}}{{template "empty" (dict "icon" "terminal" "title" "No execution is on record for this cycle." "text" "A cycle that stops before its judgment (the kit was paused, or its preflight failed) starts no agent.")}}{{end}}
+  </section>
+
+  {{/* The cycle records what it queued and proposed once it has published its work: the region is
+       there from the start, and draws nothing until then. */}}
+  <div id="cycle-produced" data-live-region class="contents">
+  {{if or $p.Queued $p.Proposals $p.VisualQA}}
+  <section class="card card-border min-w-0 bg-base-100" aria-labelledby="cycle-produced-title">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="cycle-produced-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "lightbulb" "size-4 text-primary"}}What was recorded under it</h2></div>
+    <ul class="list">
+      {{range $p.Queued}}
+      <li class="list-row items-start gap-3 text-sm">
+        {{iconc "list-ordered" "mt-0.5 size-5 shrink-0 text-base-content/60"}}
+        <div class="flex min-w-0 flex-col gap-1">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">{{template "change_link" .ChangeName}}{{state "changes.state" .State}}<span class="text-xs text-base-content/60">a change it queued{{if eq .State "unknown"}}: the main checkout does not list it, or not yet{{end}}</span></div>
+          {{with .Description}}<p class="line-clamp-2 text-base-content/80">{{.}}</p>{{end}}
+        </div>
+      </li>
+      {{end}}
+      {{range $p.Proposals}}
+      <li class="list-row items-start gap-3 text-sm">
+        {{iconc "lightbulb" "mt-0.5 size-5 shrink-0 text-base-content/60"}}
+        <div class="flex min-w-0 flex-col gap-1">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="font-mono font-medium">{{.ID}}</span>{{state "proposals.status" .Status}}<span class="text-xs text-base-content/60">a proposal</span></div>
+          {{with .Description}}<p class="line-clamp-2 text-base-content/80">{{.}}</p>{{end}}
+        </div>
+      </li>
+      {{end}}
+      {{range $p.VisualQA}}
+      <li class="list-row items-start gap-3 text-sm">
+        {{iconc "scan-eye" "mt-0.5 size-5 shrink-0 text-base-content/60"}}
+        <div class="flex min-w-0 flex-col gap-1">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="font-medium">Check in a browser #{{.ItemID}}</span>{{state "visual_qa_items.status" .Status}}{{if .ChangeName}}<a href="/changes/{{enc .ChangeName}}" class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center"><span class="sr-only">The change the check #{{.ItemID}} is about: </span>{{.ChangeName}}</a>{{end}}</div>
+          <p class="text-base-content/80">{{.What}}</p>
+        </div>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+  </div>
+
+  <section aria-labelledby="cycle-report-title">
+    <h2 id="cycle-report-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "file-text" "size-4 text-primary"}}Its report</h2>
+    {{with $p.Report}}
+    <p class="mb-2 text-xs text-base-content/70"><span class="font-mono">{{.Name}}</span> · {{if .Recorded}}the report the cycle recorded{{else}}the report written while this cycle ran{{end}}</p>
+    {{template "viewer" (dict "c" (dict "content" .Text "size" .Size "truncated" .Truncated) "name" .Name "md" "rendered" "id" "cycle-report")}}
+    {{else}}<div class="card card-border bg-base-100">{{template "empty" (dict "icon" "file-text" "title" "No report is found for this cycle." "text" "The judge writes its report when its judgment ends. A cycle that stopped before that, or whose report was removed, has none.")}}</div>{{end}}
+  </section>
+</div>
+{{end}}

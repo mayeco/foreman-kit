@@ -1,0 +1,96 @@
+{{/* System → Processes: what runs for the kit as a whole and what ran. It draws .Page, the struct its
+     read returns (internal/portal/page_system.go): the locks on record, the passes of the dispatcher
+     and the pauses of the workspace, all rows of the database. */}}
+
+{{define "processes"}}{{$p := .Page}}
+{{template "system_nav" .}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Processes</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">What runs for the kit as a whole and what ran: the locks its processes hold, the passes of the dispatcher with what their workers did, and the pauses of the workspace. What happened to one change is in the story of that change.</p>
+</header>
+
+<div class="flex flex-col gap-6">
+  <section aria-labelledby="processes-locks-title">
+    <h2 id="processes-locks-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "lock" "size-4 text-primary"}}Locks and leases</h2>
+    <div id="processes-locks" data-live-region class="card card-border min-w-0 bg-base-100">
+      {{if $p.Locks}}
+      <div class="max-w-full overflow-x-auto">
+        <table class="table table-stack">
+          <thead><tr><th>Lock</th><th>Taken by</th><th>Taken</th><th>Last renewed</th><th>Counts until</th></tr></thead>
+          <tbody>
+            {{range $p.Locks}}
+            <tr class="align-top hover:bg-base-200/60">
+              <td class="min-w-48">
+                {{if .ChangeName}}<span class="font-medium">the lease of {{template "change_link" .ChangeName}}</span>{{else}}<span class="font-mono font-medium">{{.Key}}</span>{{end}}
+                {{with .Stamp}}<p class="mt-0.5 font-mono text-xs text-base-content/70">{{.}}</p>{{end}}
+                {{if and (eq .Key "daemon") (not .Stale)}}{{with $p.DaemonGiven}}<p class="mt-1 break-words text-xs text-base-content/80">Started with {{range $i, $v := .}}{{if $i}} {{end}}<code class="break-all font-mono">--set {{$v}}</code>{{end}}: in no file, and in force until this daemon stops.</p>{{end}}{{end}}
+                {{if .Stale}}<p class="mt-1"><span class="badge badge-sm badge-ghost whitespace-nowrap" title="Its time ran out, or its process is gone: the next process that wants it takes it.">nothing holds it now</span></p>{{end}}
+              </td>
+              <td class="text-sm"><span class="font-mono">{{.OwnerType}}</span><p class="text-xs text-base-content/70">process <span class="tabular-nums">{{.PID}}</span> on {{.Host}}{{with .Slot}} · slot {{.}}{{end}}</p></td>
+              <td class="whitespace-nowrap text-sm">{{at .AcquiredAt}}</td>
+              <td class="whitespace-nowrap text-sm">{{at .HeartbeatAt}}</td>
+              <td class="whitespace-nowrap text-sm">{{at .ExpiresAt}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}{{template "empty" (dict "icon" "lock" "title" "No lock is on record." "text" "The daemon, the dispatcher, the merger, a cycle, a visual QA session and each worker take one while they run.")}}{{end}}
+    </div>
+  </section>
+
+  <section aria-labelledby="processes-dispatches-title">
+    <h2 id="processes-dispatches-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "send" "size-4 text-primary"}}Passes of the dispatcher</h2>
+    <div id="processes-dispatches" data-live-region class="card card-border min-w-0 bg-base-100">
+      {{if $p.Dispatches.Items}}
+      <div class="max-w-full overflow-x-auto">
+        <table class="table table-stack">
+          <thead><tr><th>Pass</th><th>Started</th><th>Took</th><th>Workers</th><th>Backlog</th><th>Changes it took</th><th>How it ended</th></tr></thead>
+          <tbody>
+            {{range $p.Dispatches.Items}}
+            <tr class="align-top hover:bg-base-200/60">
+              <td class="whitespace-nowrap"><span class="font-mono font-medium tabular-nums">#{{.ID}}</span> <span class="text-xs text-base-content/70">{{(word "dispatcher_runs.mode" .Mode).Text}}</span></td>
+              <td class="whitespace-nowrap text-sm">{{at .StartedAt}}</td>
+              <td class="whitespace-nowrap tabular-nums">{{took .StartedAt .FinishedAt $.ReadAt}}</td>
+              <td class="tabular-nums">{{.Workers}}</td>
+              <td class="tabular-nums">{{.BacklogSize}}</td>
+              <td class="min-w-48">
+                {{if .ChangeRuns}}<span class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="font-medium tabular-nums">{{.ChangeRuns}}</span>{{range $result, $n := .Results}}<span class="inline-flex items-center gap-1.5">{{if $result}}{{state "change_runs.result" $result}}{{else}}<span class="badge badge-sm badge-ghost whitespace-nowrap">still going</span>{{end}}<span class="text-xs tabular-nums">{{$n}}</span></span>{{end}}</span>
+                {{else}}<span class="text-base-content/60">none</span>{{end}}
+              </td>
+              <td class="text-sm">{{if .FinishedAt}}{{if .EndReason}}{{label .EndReason}}{{else}}<span class="text-base-content/60">no reason on record</span>{{end}}{{else}}<span class="badge badge-sm badge-soft badge-info whitespace-nowrap">running</span>{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}{{template "empty" (dict "icon" "send" "title" "The dispatcher has not run." "text" "A pass of the dispatcher takes the changes of the backlog its workers can build; the daemon starts one after each cycle, and a person starts one from Dashboard.")}}{{end}}
+      {{template "older_newest" (dict "older" $p.OlderDispatches "newest" $p.LatestDispatches)}}
+    </div>
+  </section>
+
+  <section aria-labelledby="processes-pauses-title">
+    <h2 id="processes-pauses-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "circle-pause" "size-4 text-primary"}}Pauses</h2>
+    <div id="processes-pauses" data-live-region class="card card-border min-w-0 bg-base-100">
+      {{if $p.Pauses.Items}}
+      <div class="max-w-full overflow-x-auto">
+        <table class="table table-stack">
+          <thead><tr><th>Paused</th><th>By</th><th>Why</th><th>Lifted</th></tr></thead>
+          <tbody>
+            {{range $p.Pauses.Items}}
+            <tr class="align-top hover:bg-base-200/60">
+              <td class="whitespace-nowrap text-sm">{{at .PausedAt}}</td>
+              <td class="text-sm">{{(word "workspace_pauses.paused_by" .PausedBy).Text}}</td>
+              <td class="min-w-56 max-w-xl"><p class="break-words text-sm">{{if .Reason}}{{.Reason}}{{else}}<span class="text-base-content/60">no reason given</span>{{end}}</p>{{with .ChangeName}}<p class="mt-0.5 text-xs text-base-content/70">about {{template "change_link" .}}</p>{{end}}</td>
+              <td class="text-sm">{{if .ResumedAt}}<span class="whitespace-nowrap">{{at .ResumedAt}}</span>{{with .ResumedBy}}<p class="text-xs text-base-content/70">by {{(word "workspace_pauses.paused_by" .).Text}}</p>{{end}}{{else}}<span class="badge badge-sm badge-soft badge-warning whitespace-nowrap">{{iconc "circle-pause" "size-3 shrink-0"}}in force</span>{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}{{template "empty" (dict "icon" "circle-pause" "title" "The kit was never paused." "text" "A person pauses it from the top bar, and the kit pauses itself when it finds something only a person can settle.")}}{{end}}
+      {{template "older_newest" (dict "older" $p.OlderPauses "newest" $p.LatestPauses)}}
+    </div>
+  </section>
+</div>
+{{end}}

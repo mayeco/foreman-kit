@@ -1,0 +1,105 @@
+# Publishes the npm package @mayeco/foreman-kit from the binaries of a GitHub release of
+# foreman-kit: release.yml calls it after GoReleaser, and it can be run by hand for a release that
+# exists already (Actions > npm-publish > Run workflow, with the tag).
+#
+# The package is laid out by scripts/npm-pack.sh --prebuilt --public; the one in the repository is
+# private, so nothing but this workflow publishes it. A version with a prerelease part (4.1.0-rc.1)
+# is published under the dist-tag next, any other under latest.
+#
+# Needs the repository secret NPM_TOKEN: an npm automation token of an account that may publish the
+# @mayeco scope. The package is published with provenance (the repository is public).
+name: npm-publish
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag (v4.1.0); empty with dry-run: the binaries of the snapshot"
+        type: string
+        required: false
+        default: ""
+      dry-run:
+        description: "Pack the package and keep it as an artifact, publish nothing"
+        type: boolean
+        required: false
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose binaries are published (v4.1.0)"
+        type: string
+        required: true
+      dry-run:
+        description: "Pack the package and keep it as an artifact, publish nothing"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: ${{ inputs.dry-run && 'pack (dry run)' || 'publish' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+      - name: Binaries of the release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh release download "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --pattern 'foreman-kit-*' --pattern checksums.txt --dir release
+          (cd release && sha256sum --check --ignore-missing checksums.txt)
+      - name: Binaries of the snapshot
+        if: inputs.tag == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: snapshot-binaries
+          path: release
+      - name: Version
+        id: version
+        run: |
+          tag="${{ inputs.tag }}"
+          if [ -n "$tag" ]; then
+            version="${tag#v}"
+          else
+            version="0.0.0-snapshot.${GITHUB_RUN_NUMBER}"
+          fi
+          case "$version" in
+            *-*) dist_tag=next ;;
+            *) dist_tag=latest ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "dist-tag=$dist_tag" >> "$GITHUB_OUTPUT"
+      - name: Pack
+        id: pack
+        env:
+          FOREMANKIT_KIT_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          chmod +x scripts/*.sh
+          tgz="$(scripts/npm-pack.sh --prebuilt release --public)"
+          echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
+          tar -tzf "$tgz"
+      - name: Check the launcher runs the binary
+        run: |
+          dir="$(mktemp -d)"
+          npm install --global --prefix "$dir" "${{ steps.pack.outputs.tgz }}"
+          "$dir/bin/foreman-kit" version
+      - uses: actions/upload-artifact@v4
+        if: inputs.dry-run
+        with:
+          name: npm-package
+          path: ${{ steps.pack.outputs.tgz }}
+      - name: Publish
+        if: ${{ !inputs.dry-run }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "${{ steps.pack.outputs.tgz }}" --access public --provenance --tag "${{ steps.version.outputs.dist-tag }}"

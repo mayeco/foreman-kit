@@ -1,0 +1,152 @@
+{{/* Visual QA: what there is to look at in a browser. The pages draw .Page, the structs their reads
+     return (internal/portal/page_visual.go): the checks and the session in progress are rows of the
+     database; the plan and the report of a session are files the kit wrote. */}}
+
+{{/* The two parts of visual QA. Takes "active" ("checks" or "sessions"), "checks" and "sessions",
+     how many there are of each. */}}
+{{define "visual_tabs"}}
+<div role="tablist" class="tabs tabs-lift mb-0 max-w-full" aria-label="The checks and the sessions of visual QA">
+  <a role="tab" href="/visual" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if eq .active "checks"}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if eq .active "checks"}} aria-selected="true"{{end}}>{{icon "scan-eye"}}Checks<span class="badge badge-sm badge-ghost tabular-nums">{{.checks}}</span></a>
+  <a role="tab" href="/visual/sessions" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if eq .active "sessions"}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if eq .active "sessions"}} aria-selected="true"{{end}}>{{icon "history"}}Sessions<span class="badge badge-sm badge-ghost tabular-nums">{{.sessions}}</span></a>
+</div>
+{{end}}
+
+{{/* What a person does about the session: end the one in progress, or begin one. Takes "session"
+     (store.VisualSession or nil) and "setup" (VisualSetup). */}}
+{{define "visual_session_controls"}}
+{{if .session}}
+<p class="flex items-center gap-2 text-sm">{{iconc "circle-dot" "size-4 shrink-0 text-success"}}<span>A session is open since {{at .session.StartedAt}}. If nobody ends it, it stops counting as open {{at .session.ExpiresAt}}.</span></p>
+<div class="flex flex-wrap gap-2">
+  <a class="btn btn-sm touch:min-h-11" href="/visual/sessions/{{enc .session.Stamp}}">{{icon "route"}}Its plan</a>
+  <button class="btn btn-sm touch:min-h-11" data-post="/api/visual-qa/session/end" data-title="What ending the session said" data-busy="Ending the session: it records what it found…">{{icon "square"}}End session</button>
+</div>
+{{else}}
+<button class="btn btn-sm btn-primary touch:min-h-11" data-post="/api/visual-qa/session/begin" data-title="What beginning the session said" data-busy="Beginning a session…">{{icon "circle-play"}}Begin session</button>
+{{end}}
+{{end}}
+
+{{define "visual"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Visual QA</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">What there is to look at in a browser: the checks a cycle, a merge or a person asked for. A session takes the ones that wait, and each one ends with what was seen.</p>
+    {{if not $p.Setup.Enabled}}<p class="mt-2 flex max-w-3xl items-start gap-2 text-sm text-warning">{{iconc "triangle-alert" "mt-0.5 size-4 shrink-0"}}<span>This application does not run visual QA: <a class="link inline-flex min-h-6 items-center touch:min-h-11" href="{{settingHref $p.Setup.Key}}">{{$p.Setup.Where}}</a> turns it on. Nothing asks for a check until then.</span></p>{{end}}
+  </div>
+  <div id="visual-session" data-live-region class="flex max-w-xl flex-col items-start gap-2 sm:items-end">{{template "visual_session_controls" (dict "session" $p.Session "setup" $p.Setup)}}</div>
+</header>
+
+{{template "visual_tabs" (dict "active" "checks" "checks" $p.Total "sessions" $p.Sessions)}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100">
+  <details class="collapse collapse-plus rounded-none border-b border-base-content/10">
+    <summary class="collapse-title font-display font-semibold touch:min-h-11"><span class="flex items-center gap-2">{{iconc "plus" "size-4 text-primary"}}Ask for a check</span></summary>
+    <div class="collapse-content">
+      <form data-api="/api/visual-qa/items" data-toast="The check waits for a session" class="grid gap-x-4 gap-y-1 md:grid-cols-3">
+        <fieldset class="fieldset md:col-span-2">
+          <label class="label" for="visual-what">What to look at in the browser</label>
+          <input id="visual-what" name="what" required class="input input-sm w-full touch:min-h-11" placeholder="The checkout button stays in view at 390 px" autocomplete="off">
+        </fieldset>
+        <fieldset class="fieldset">
+          <label class="label" for="visual-change">The change it is about (optional)</label>
+          <input id="visual-change" name="change_name" pattern="[a-z0-9][a-z0-9\-]*" title="Lowercase letters, digits and hyphens" class="input input-sm validator w-full touch:min-h-11" placeholder="add-checkout" autocomplete="off">
+          <p class="validator-hint hidden">Lowercase letters, digits and hyphens.</p>
+        </fieldset>
+        <div class="md:col-span-3"><button type="submit" class="btn btn-sm btn-primary touch:min-h-11">{{icon "plus"}}Ask for it</button></div>
+      </form>
+    </div>
+  </details>
+  <div class="border-b border-base-content/10 p-3">
+    <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="Status of the check">
+      {{range $p.Tabs}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap gap-1.5 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}<span class="text-xs tabular-nums opacity-70">{{.Count}}</span></a>{{end}}
+    </div>
+  </div>
+  <div id="visual-checks" data-live-region>
+    {{if $p.Items}}
+    <div class="max-w-full overflow-x-auto">
+      <table class="table table-stack">
+        <thead><tr><th>Check</th><th>Status</th><th>What to look at</th><th>Change</th><th>Asked</th></tr></thead>
+        <tbody>
+          {{range $p.Items}}
+          <tr class="align-top hover:bg-base-200/60">
+            <td class="whitespace-nowrap font-mono tabular-nums">#{{.ItemID}}</td>
+            <td>{{state "visual_qa_items.status" .Status}}</td>
+            <td class="min-w-64 max-w-xl">
+              <p class="break-words text-sm">{{.What}}</p>
+              {{if and .VerdictNote .ResolvedAt}}<p class="mt-1 break-words text-xs text-base-content/70">{{.VerdictNote}}</p>{{end}}
+              {{if or (eq .Status "pending") (eq .Status "in_progress")}}
+              <details id="verdict-{{.ItemID}}" class="mt-2">
+                <summary class="link link-hover inline-flex min-h-6 cursor-pointer items-center text-xs touch:min-h-11">Say how the check #{{.ItemID}} ended</summary>
+                <form data-api="/api/visual-qa/items/{{enc .ItemID}}/verdict" data-toast="The check #{{.ItemID}} ended" class="mt-2 flex flex-wrap items-end gap-2">
+                  <label class="flex flex-col gap-1 text-xs"><span>Verdict</span>
+                    <select name="verdict" class="select select-sm touch:min-h-11" required>{{range $p.Verdicts}}<option value="{{.}}">{{(word "visual_qa_items.status" .).Text}}</option>{{end}}</select>
+                  </label>
+                  <label class="flex min-w-48 flex-1 flex-col gap-1 text-xs"><span>What was seen</span>
+                    <input name="note" class="input input-sm w-full touch:min-h-11" autocomplete="off">
+                  </label>
+                  <button type="submit" class="btn btn-sm touch:min-h-11">Record</button>
+                </form>
+              </details>
+              {{end}}
+            </td>
+            <td>{{if .ChangeName}}{{template "change_link" .ChangeName}}{{else}}<span class="text-base-content/60">none</span>{{end}}</td>
+            <td class="text-sm">
+              <span class="whitespace-nowrap">{{at .CreatedAt}}</span>
+              {{with .CycleStamp}}<p class="text-xs text-base-content/70">by the cycle <a class="link link-hover font-mono touch:inline-flex touch:min-h-11 touch:items-center" href="/cycles/{{enc .}}">{{.}}</a></p>{{end}}
+              {{if .ResolvedAt}}<p class="text-xs text-base-content/70">ended {{at .ResolvedAt}}</p>{{else if .StartedAt}}<p class="text-xs text-base-content/70">taken {{at .StartedAt}}</p>{{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else if $p.Status}}{{template "empty" (dict "icon" "scan-eye" "title" "No check is in this status." "text" "The other statuses, and all the checks, are one click away above.")}}
+    {{else}}{{template "empty" (dict "icon" "scan-eye" "title" "Nobody asked for a check yet." "text" "A cycle asks for one when it wants a person or a browser to look at what it built, the kit asks for one for a change it integrated, and a person asks for one above.")}}{{end}}
+  </div>
+  {{template "older_newest" (dict "older" $p.Older "newest" $p.Newest)}}
+</div>
+{{end}}
+
+{{define "visual_sessions"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Visual QA sessions</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">A session takes the checks that wait, writes the plan to work them, and leaves a report of what it found. These are the sessions whose plan is among the files of the kit.</p>
+  </div>
+  <div class="flex max-w-xl flex-col items-start gap-2 sm:items-end">{{template "visual_session_controls" (dict "session" $p.Current "setup" $p.Setup)}}</div>
+</header>
+
+{{template "visual_tabs" (dict "active" "sessions" "checks" $p.Checks "sessions" $p.Total)}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100">
+  {{if $p.Sessions}}
+  <ul class="list">
+    {{range $p.Sessions}}
+    <li class="list-row items-center gap-3">
+      {{iconc "history" "size-5 shrink-0 text-base-content/60"}}
+      <div class="flex min-w-0 flex-col gap-0.5">
+        <a class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:items-center" href="/visual/sessions/{{enc .Stamp}}">{{.Stamp}}</a>
+        <span class="text-xs text-base-content/70">began {{at .StartedAt}}{{if and $p.Current (eq $p.Current.Stamp .Stamp)}} · open now{{end}}</span>
+      </div>
+      <span class="text-xs text-base-content/70">{{if .HasReport}}it wrote its report{{else}}no report{{end}}</span>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}{{template "empty" (dict "icon" "history" "title" "No session left a plan." "text" "A session writes its plan when it begins, and its report when the agent or the person that works it ends.")}}{{end}}
+  {{template "older_newest" (dict "older" $p.Older "newest" $p.Newest)}}
+</div>
+{{end}}
+
+{{define "visual_session"}}{{$p := .Page}}
+<header class="mb-5">
+  <p class="text-xs font-medium uppercase tracking-wider text-base-content/60">Visual QA session</p>
+  <h1 class="mt-1 break-all font-mono text-xl font-semibold sm:text-2xl">{{$p.Stamp}}</h1>
+  {{if $p.Open}}<p class="mt-2 flex items-center gap-2 text-sm">{{iconc "circle-dot" "size-4 shrink-0 text-success"}}<span>This session is open now. <a class="link touch:inline-flex touch:min-h-11 touch:items-center" href="/visual">Its checks</a> are the ones in progress.</span></p>{{end}}
+</header>
+<div role="tablist" class="tabs tabs-lift max-w-full" aria-label="The files of the session">
+  {{range $p.Tabs}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}</a>{{end}}
+</div>
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100 p-4">
+  {{with $p.Current}}
+  <p class="mb-2 text-xs text-base-content/70"><span class="font-mono">{{.Name}}</span></p>
+  {{template "viewer" (dict "c" (dict "content" .Text "size" .Size "truncated" .Truncated) "name" .Name "md" "rendered" "id" "visual-session-file")}}
+  {{else}}{{template "empty" (dict "icon" "file-text" "title" "The session did not write this file.")}}{{end}}
+</div>
+{{end}}

@@ -1,0 +1,123 @@
+{{/* Backlog: what comes next and why each change waits, and the proposals. It draws .Page, the struct
+     its read returns (internal/portal/page_backlog.go). The page says why a change waits, from rows;
+     which one starts next is the dispatcher's to say, and "Simulate dispatch" asks it. */}}
+
+{{/* One recorded fact that holds a change back. Takes the fact (store.WaitFact). */}}
+{{define "wait_fact"}}
+<li class="flex items-start gap-2">
+  {{if eq .Kind "dependency"}}{{iconc "git-branch" "mt-0.5 size-3.5 shrink-0 text-base-content/60"}}<p class="min-w-0">It depends on {{template "change_ref" .OtherChange}}, which is {{(word "changes.state" .OtherState).Text}}.</p>
+  {{else if eq .Kind "block"}}{{iconc "octagon-alert" "mt-0.5 size-3.5 shrink-0 text-error"}}<p class="min-w-0">It is blocked: {{label .Reason}}{{with .Since}}, since {{at .}}{{end}}. It waits for a person.</p>
+  {{else if eq .Kind "deferral"}}{{iconc "clock" "mt-0.5 size-3.5 shrink-0 text-warning"}}<p class="min-w-0">No engine could take its {{.Reason}} role{{with .Since}}, last {{at .}}{{end}}.{{with .Until}} The dispatcher tries again {{at .}}.{{end}}</p>
+  {{else if eq .Kind "lock"}}{{iconc "lock" "mt-0.5 size-3.5 shrink-0 text-base-content/60"}}<p class="min-w-0">It declares the lock <span class="font-mono">{{.LockName}}</span>, and so does {{template "change_ref" .OtherChange}}, which is {{(word "changes.state" .OtherState).Text}}.</p>
+  {{else}}<p class="min-w-0">{{label .Kind}}</p>{{end}}
+</li>
+{{end}}
+
+{{define "backlog"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Backlog</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">{{if eq $p.Tab "proposals"}}What the cycles proposed. An approved proposal is queued by the next cycle while the queue has room; a rejected one is not proposed again.{{else}}The changes of the queue, by priority and then by how long each has waited, with what is on record that holds each one back.{{end}}</p>
+  </div>
+  {{if eq $p.Tab "proposals"}}<button class="btn btn-sm touch:min-h-11" data-post="/api/proposals/review" data-title="What the review of the proposals said" data-busy="Asking the judge…">{{icon "sparkles"}}Ask the judge to review them</button>
+  {{else}}<button class="btn btn-sm touch:min-h-11" data-post="/api/dispatcher/simulations" data-title="What the dispatcher would start now" data-busy="Asking the dispatcher…">{{icon "send"}}Simulate dispatch</button>{{end}}
+</header>
+
+{{/* A backlog that is missing reads as an empty queue, with no error: the page says what the kit
+     found in its place, and how a person looks into it. */}}
+<div id="backlog-file" data-live-region class="contents">
+  {{with $p.BacklogProblem}}
+  <div role="alert" class="alert alert-vertical mb-5 items-start border-error/60 bg-error/10 sm:alert-horizontal">
+    {{iconc "octagon-alert" "size-6 text-error"}}
+    <div class="flex min-w-0 flex-col gap-1 text-start text-base-content">
+      <h2 class="font-display text-lg font-semibold">The backlog of the main checkout is {{.}}</h2>
+      <p class="break-words text-sm">The kit reads the queue from <code class="font-mono">{{$p.BacklogPath}}</code>. Without it the queue reads as empty, the dispatcher starts nothing, and the changes on record show as not in the backlog. The portal changes nothing of the backlog until the file is back.</p>
+      <p class="break-words text-sm text-base-content/70"><code class="font-mono">git status</code> in the main checkout says what became of it, and <code class="font-mono">git restore {{$p.BacklogPath}}</code> brings back the one of its last commit.</p>
+    </div>
+  </div>
+  {{end}}
+</div>
+
+<div role="tablist" class="tabs tabs-lift mb-0 max-w-full" aria-label="The backlog and its proposals">
+  <a role="tab" href="/backlog" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if ne $p.Tab "proposals"}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if ne $p.Tab "proposals"}} aria-selected="true"{{end}}>{{icon "list-ordered"}}Queue<span class="badge badge-sm badge-ghost tabular-nums">{{len $p.Queue}}</span></a>
+  <a role="tab" href="/backlog/proposals" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if eq $p.Tab "proposals"}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if eq $p.Tab "proposals"}} aria-selected="true"{{end}}>{{icon "lightbulb"}}Proposals</a>
+</div>
+
+{{if eq $p.Tab "proposals"}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100">
+  <div class="border-b border-base-content/10 p-3">
+    <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="Status of the proposal">
+      {{range $p.Statuses}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}</a>{{end}}
+    </div>
+  </div>
+  {{if $p.Proposals.Items}}
+  <ul class="list">
+    {{range $p.Proposals.Items}}
+    <li class="list-row items-start gap-3 text-sm">
+      {{iconc "lightbulb" "mt-0.5 size-5 shrink-0 text-base-content/60"}}
+      <div class="flex min-w-0 flex-col gap-1.5">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="font-mono font-medium">{{.ID}}</span>{{state "proposals.status" .Status}}{{if eq .Priority "critical"}}<span class="badge badge-sm badge-error">critical priority</span>{{else if eq .Priority "high"}}<span class="badge badge-sm badge-warning">high priority</span>{{end}}<span class="text-xs text-base-content/60">proposed {{at .ProposedAt}}{{with .Source}} · from {{label .}}{{end}}{{with .Strategy}} · {{label .}}{{end}}</span></div>
+        {{with .Description}}{{template "clamped" .}}{{end}}
+        {{if or (eq .Status "queued") (eq .Status "integrated")}}<p>{{template "change_link" .ID}}</p>{{end}}
+      </div>
+      {{if or (eq .Status "proposed") (eq .Status "approved")}}<div class="flex flex-wrap gap-2 max-md:list-col-wrap md:justify-end">{{if eq .Status "proposed"}}{{template "proposal_btns" .ID}}{{else}}<button class="btn btn-sm touch:min-h-11" data-post="/api/proposals/{{enc .ID}}/reject" data-confirm="Reject {{.ID}}? It was approved, and it is not queued." data-confirm-title="Reject this proposal?" data-confirm-ok="Reject" data-danger="1" data-toast="Rejected {{.ID}}">{{icon "x"}}Reject</button>{{end}}</div>{{end}}
+    </li>
+    {{end}}
+  </ul>
+  {{else}}{{template "empty" (dict "icon" "lightbulb" "title" "No proposal has this status." "text" "Pick another status above. A cycle proposes changes here when it finds something worth building.")}}{{end}}
+  {{template "older_newest" (dict "older" $p.Older "newest" $p.Newest)}}
+</div>
+
+{{else}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100">
+  <details class="collapse collapse-plus rounded-none border-b border-base-content/10">
+    <summary class="collapse-title font-display font-semibold touch:min-h-11"><span class="flex items-center gap-2">{{iconc "plus" "size-4 text-primary"}}Add a change to the backlog</span></summary>
+    <div class="collapse-content">
+      <form data-api="/api/backlog" data-toast="Queued" class="grid gap-x-4 gap-y-1 md:grid-cols-3">
+        <fieldset class="fieldset">
+          <label class="label" for="backlog-name">Name of the change</label>
+          <input id="backlog-name" name="change_name" required pattern="[a-z0-9][a-z0-9\-]*" title="Lowercase letters, digits and hyphens" class="input input-sm validator w-full touch:min-h-11" placeholder="add-payment-retries" autocomplete="off">
+          <p class="validator-hint hidden">Lowercase letters, digits and hyphens.</p>
+        </fieldset>
+        <fieldset class="fieldset">
+          <label class="label" for="backlog-priority">Priority</label>
+          <select id="backlog-priority" name="priority" class="select select-sm w-full touch:min-h-11">{{range $p.Priorities}}<option>{{.}}</option>{{end}}</select>
+        </fieldset>
+        <fieldset class="fieldset">
+          <label class="label" for="backlog-deps">It depends on (names, separated by commas)</label>
+          <input id="backlog-deps" name="depends_on" class="input input-sm w-full touch:min-h-11" placeholder="refactor-payment-client" autocomplete="off">
+        </fieldset>
+        <fieldset class="fieldset md:col-span-3">
+          <label class="label" for="backlog-description">What to build, and how to accept it</label>
+          <textarea id="backlog-description" name="description" required rows="4" class="textarea validator w-full" placeholder="Retry failed card captures up to 3 times with exponential backoff. Acceptance: a declined capture is retried; a fraud decline is not."></textarea>
+          <p class="validator-hint hidden">Say what to build and how to accept it.</p>
+        </fieldset>
+        <div class="md:col-span-3"><button type="submit" class="btn btn-sm btn-primary touch:min-h-11">{{icon "plus"}}Add to the backlog</button></div>
+      </form>
+    </div>
+  </details>
+  <div id="backlog-queue" data-live-region>
+    {{if $p.Queue}}
+    <ul class="list">
+      {{range $p.Queue}}
+      <li class="list-row items-start gap-3 text-sm">
+        <div class="flex min-w-0 flex-col gap-1.5 list-col-grow">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {{template "change_link" .ChangeName}}
+            {{state "changes.state" .State}}
+            {{if eq .Priority "critical"}}<span class="badge badge-sm badge-error">critical</span>{{else if eq .Priority "high"}}<span class="badge badge-sm badge-warning">high</span>{{else if eq .Priority "low"}}<span class="badge badge-sm badge-ghost">low</span>{{end}}
+            <span class="text-xs text-base-content/60">{{if .QueuedAt}}queued {{at .QueuedAt}}{{else}}first seen {{at .FirstSeenAt}}{{end}}{{with .LastRunResult}} · its last run: {{(word "change_runs.result" .).Text}}{{end}}</span>
+          </div>
+          {{with .Description}}<p class="line-clamp-2 max-w-3xl text-base-content/80">{{.}}</p>{{end}}
+          {{if .Facts}}<ul class="flex flex-col gap-1 text-xs text-base-content/80">{{range .Facts}}{{template "wait_fact" .}}{{end}}</ul>
+          {{else if eq .State "queued"}}<p class="text-xs text-base-content/60">Nothing on record holds it back.</p>{{end}}
+        </div>
+        {{if eq .State "queued"}}<div class="max-md:list-col-wrap"><button class="btn btn-sm touch:min-h-11" data-post="/api/backlog/{{enc .ChangeName}}" data-method="DELETE" data-danger="1" data-confirm="Take {{.ChangeName}} out of the backlog? Nothing is built for it. It can be added again later." data-confirm-title="Take it out of the backlog?" data-confirm-ok="Take it out" data-toast="{{.ChangeName}} is out of the backlog">{{icon "trash-2"}}Take out</button></div>{{end}}
+      </li>
+      {{end}}
+    </ul>
+    {{else}}{{template "empty" (dict "icon" "inbox" "title" "The backlog is empty." "text" "Add a change above, approve a proposal, or let a cycle queue what it finds.")}}{{end}}
+  </div>
+</div>
+{{end}}
+{{end}}

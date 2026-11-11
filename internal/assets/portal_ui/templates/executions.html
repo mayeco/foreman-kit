@@ -1,0 +1,281 @@
+{{/* Executions: the list of what ran, the form that runs an agent, and the page of one execution.
+     Each page draws .Page, the struct its read returns (internal/portal/page_executions.go). */}}
+
+{{/* The engines that worked on an execution, in the order they were tried. Takes []string. */}}
+{{define "engines_tried"}}{{range $i, $e := .}}{{if $i}}<span class="text-base-content/50" aria-label="then">→</span>{{end}}<span class="flex items-center gap-1">{{agentIcon $e "size-3.5"}}{{$e}}</span>{{end}}{{end}}
+
+{{/* An agent that shows no activity now: for how long, and when the idle watchdog stops it. Takes *store.IdleAgent. */}}
+{{define "idle_now"}}{{with .}}<span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-content/70" title="No file changed, nothing printed and no command of the agent used CPU. The idle watchdog stops it at {{idleLimitName}}.">{{badge (printf "no activity for %s" (seconds .IdleSeconds)) "warning"}}<span>stopped at {{seconds .LimitSeconds}}</span></span>{{end}}{{end}}
+
+{{/* The options of a select of engines. dict: engines ([]EngineChoice), sel (the one selected), or
+     same (the engine a follow-up keeps when none is chosen: its option has no value) */}}
+{{define "engine_options"}}{{$sel := .sel}}{{with .same}}<option value="" selected>the same agent: {{.}}</option>{{end}}<option value="auto"{{if eq $sel "auto"}} selected{{end}}>auto: the agents of this application, as it picks among them</option>{{range .engines}}<option value="{{.Name}}"{{if eq .Name $sel}} selected{{end}}>{{.Name}} ({{.Label}}){{if not .Installed}}, not on PATH{{end}}</option>{{end}}{{end}}
+
+{{/* One execution in a list. dict: row (executionRow), at (when the page was read) */}}
+{{define "exec_line"}}{{$r := .row}}
+<li class="list-row items-center gap-3 text-sm">
+  <span class="w-14 shrink-0 text-xs text-base-content/60 tabular-nums" title="{{stamp $r.StartedAt}}">{{clock $r.StartedAt}}</span>
+  <div class="flex min-w-0 flex-col gap-1">
+    <a href="{{execHref $r.ExecID}}" class="link link-hover truncate font-medium touch:py-3">{{$r.Name}}{{with $r.About}}<span class="font-normal text-base-content/70"> · {{.}}</span>{{end}}</a>
+    <span class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60">
+      <span>{{(word "executions.kind" $r.Kind).Text}}</span>
+      {{with $r.EnginesTried}}<span class="flex flex-wrap items-center gap-1.5">{{template "engines_tried" .}}</span>{{end}}
+      {{/* The title already names the change of a worker. Where a finger points, a second link to
+           it would be a row of 44 px more: it is left out there. */}}
+      {{with $r.ChangeName}}<a href="/changes/{{enc .}}" class="link link-hover font-mono {{if eq . $r.About}} touch:hidden {{else}} touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center {{end}}">{{.}}</a>{{end}}
+      <span class="tabular-nums">{{if $r.FinishedAt}}took{{else}}running for{{end}} {{took $r.StartedAt $r.FinishedAt .at}}</span>
+    </span>
+    {{template "idle_now" $r.Idle}}
+    {{if $r.OwnerGone}}<span class="text-xs text-warning">The process that ran it is gone: it ended without recording how.</span>{{end}}
+  </div>
+  <span class="flex items-center gap-2 max-sm:list-col-wrap">{{state "executions.status" $r.Status}}{{if and (eq $r.Status "running") (not $r.OwnerGone)}}<span class="loading loading-dots loading-xs text-info" aria-hidden="true"></span>{{end}}</span>
+</li>
+{{end}}
+
+{{define "executions"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Executions</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">Everything that ran, the latest first: the prompts of the workers, the judge of each cycle, the agents run from the portal and the operations of the kit.</p>
+  </div>
+  <a href="/executions/new" class="btn btn-sm btn-primary touch:min-h-11">{{icon "plus"}}New agent run</a>
+</header>
+{{if $p.All}}
+<div role="alert" class="alert alert-info alert-soft mb-4 text-base-content">
+  {{iconc "list-filter" "size-4 shrink-0 text-info"}}
+  <span>Showing only the executions of {{with $p.Filter.Change}}the change <b class="font-mono">{{.}}</b>{{end}}{{if and $p.Filter.Change $p.Filter.Cycle}} and {{end}}{{with $p.Filter.Cycle}}the cycle <b class="font-mono">{{.}}</b>{{end}}.</span>
+  <a href="{{$p.All}}" class="btn btn-sm btn-ghost touch:min-h-11">Show everything</a>
+</div>
+{{end}}
+<div class="mb-4 flex flex-wrap items-center gap-3">
+  <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="Kind of execution">
+    {{range $p.Kinds}}<a role="tab" href="{{.Href}}" class="tab shrink-0 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}</a>{{end}}
+  </div>
+  <form method="get" action="/executions" class="flex flex-wrap items-center gap-2">
+    {{with $p.Filter.Kind}}<input type="hidden" name="kind" value="{{.}}">{{end}}
+    {{with $p.Filter.Change}}<input type="hidden" name="change" value="{{.}}">{{end}}
+    {{with $p.Filter.Cycle}}<input type="hidden" name="cycle" value="{{.}}">{{end}}
+    <label class="sr-only" for="exec-status">Status</label>
+    <select id="exec-status" name="status" class="select select-sm w-40 touch:min-h-11" data-autosubmit>
+      <option value="">Any status</option>
+      {{range $p.Statuses}}<option value="{{.Value}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <label class="sr-only" for="exec-engine">Engine</label>
+    <select id="exec-engine" name="engine" class="select select-sm w-40 touch:min-h-11" data-autosubmit>
+      <option value="">Any engine</option>
+      {{range $p.Engines}}<option value="{{.Value}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <noscript><button type="submit" class="btn btn-sm">Filter</button></noscript>
+  </form>
+</div>
+<div id="executions-list" data-live-region class="card card-border min-w-0 bg-base-100">
+  {{if $p.Items}}
+    {{$day := ""}}
+    {{range $p.Items}}{{$this := day .StartedAt}}
+      {{if ne $this $day}}{{if $day}}</ul>{{end}}<h2 class="sticky top-14 z-10 border-y border-base-content/10 bg-base-200/95 px-4 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-base-content/70 backdrop-blur">{{$this}}</h2><ul class="list">{{$day = $this}}{{end}}
+      {{template "exec_line" (dict "row" . "at" $.ReadAt)}}
+    {{end}}</ul>
+  {{else if or $p.Filter.Kind $p.Filter.Status $p.Filter.Engine $p.Filter.Change $p.Filter.Cycle}}{{template "empty" (dict "icon" "text-search" "title" "No execution matches these filters." "text" "Pick another kind, status or engine.")}}
+  {{else}}{{template "empty" (dict "icon" "activity" "title" "Nothing has run yet." "text" "An execution appears here when a worker, a cycle or a person starts one.")}}{{end}}
+  {{if or $p.Older $p.Newest}}
+  <nav class="flex flex-wrap items-center justify-between gap-3 border-t border-base-content/10 px-4 py-3 text-sm" aria-label="Pages">
+    {{if $p.Newest}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Newest}}">{{icon "chevrons-left"}}Latest</a>{{else}}<span></span>{{end}}
+    {{if $p.Older}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Older}}">Older{{icon "chevron-right"}}</a>{{else}}<span class="text-xs text-base-content/60">These are the oldest.</span>{{end}}
+  </nav>
+  {{end}}
+</div>
+{{end}}
+
+{{define "execution_new"}}{{$p := .Page}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">New agent run</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">Send a prompt to an agent. It runs in the background at the root of the workspace, and the next page follows its output.</p>
+</header>
+<div class="card card-border max-w-3xl bg-base-100">
+  <form class="card-body gap-4" method="post" data-api="/api/executions" data-toast="Agent run started">
+    <fieldset class="fieldset">
+      <label class="label" for="new-engine">Agent</label>
+      <select id="new-engine" name="engine" class="select w-full touch:min-h-11">{{template "engine_options" (dict "engines" $p.Engines "sel" $p.Default)}}</select>
+    </fieldset>
+    <fieldset class="fieldset">
+      <label class="label" for="new-prompt">Prompt</label>
+      <textarea id="new-prompt" name="prompt" rows="10" required class="textarea validator w-full font-mono text-sm" placeholder="Summarize the open OpenSpec changes in openspec/changes and list which ones touch the payments service."></textarea>
+      <p class="validator-hint hidden">Write the instruction for the agent.</p>
+    </fieldset>
+    <p class="text-sm text-base-content/70">To run an agent in the worktree of a change, open the change and use its Intervene tab.</p>
+    <div class="card-actions"><button type="submit" class="btn btn-primary touch:min-h-11">{{icon "send"}}Run in the background</button></div>
+  </form>
+</div>
+{{end}}
+
+{{define "execution"}}{{$p := .Page}}{{$live := $p.Live}}{{$id := enc $p.ExecID}}
+<header id="exec-head" data-live-region class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0">
+    <p class="text-xs font-medium uppercase tracking-wider text-base-content/60">{{(word "executions.kind" $p.Kind).Text}}</p>
+    <h1 class="mt-1 break-words font-display text-2xl font-bold sm:text-3xl">{{$p.Title}}</h1>
+    {{if and (eq $p.Kind "portal_run") $p.About}}<p class="mt-1 max-w-3xl break-words text-sm text-base-content/80">{{$p.About}}</p>{{end}}
+    <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+      <span class="flex items-center gap-2">{{state "executions.status" $p.Status}}{{if $live}}<span class="loading loading-dots loading-sm text-info" aria-hidden="true"></span>{{end}}</span>
+      {{with $p.EnginesTried}}<span class="flex flex-wrap items-center gap-1.5">{{template "engines_tried" .}}</span>{{end}}
+      <span class="text-base-content/70">started {{at $p.StartedAt}} · {{if $p.FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took $p.StartedAt $p.FinishedAt $.ReadAt}}</span></span>
+      {{template "idle_now" $p.Idle}}
+    </div>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {{if $p.CanStop}}<button class="btn btn-sm touch:min-h-11" data-post="/api/executions/{{$id}}/stop" data-refresh="regions" data-toast="Stopped" data-confirm="Stop {{$p.Name}}? What it started is told to end, and the execution is recorded as stopped." data-confirm-title="Stop this execution?" data-confirm-ok="Stop it" data-danger="1">{{icon "square"}}Stop</button>{{end}}
+    {{if $p.CanRerun}}<button class="btn btn-sm touch:min-h-11" data-post="/api/executions/{{$id}}/rerun" data-toast="Started again">{{icon "repeat"}}Run again</button>{{end}}
+    {{if $p.ChangeName}}<a class="btn btn-sm touch:min-h-11" href="/changes/{{enc $p.ChangeName}}">{{icon "git-branch"}}Open the change</a>{{end}}
+    {{if and (eq $p.Kind "cycle") $p.CycleStamp}}<a class="btn btn-sm touch:min-h-11" href="/cycles/{{enc $p.CycleStamp}}">{{icon "orbit"}}Open the cycle</a>{{end}}
+  </div>
+</header>
+
+{{/* The alert changes its colors with what happened, so the region that is refreshed is the element around it. */}}
+<div id="exec-outcome" data-live-region class="mb-5">
+<div role="alert" class="alert alert-vertical items-start sm:alert-horizontal {{if eq $p.Outcome.Tone "error"}} border-error/60 bg-error/10 {{else if eq $p.Outcome.Tone "warning"}} border-warning/60 bg-warning/10 {{else if eq $p.Outcome.Tone "success"}} border-success/60 bg-success/10 {{end}}">
+  {{if eq $p.Outcome.Tone "error"}}{{iconc "octagon-alert" "size-6 text-error"}}{{else if eq $p.Outcome.Tone "warning"}}{{iconc "triangle-alert" "size-6 text-warning"}}{{else if eq $p.Outcome.Tone "success"}}{{iconc "circle-check" "size-6 text-success"}}{{else}}{{iconc "info" "size-6 text-info"}}{{end}}
+  <div class="flex min-w-0 flex-col gap-1 text-base-content">
+    <h2 class="font-display text-lg font-semibold">{{if eq $p.Status "running"}}What it is doing{{else}}What happened{{end}}</h2>
+    <p class="text-sm">{{$p.Outcome.Text}}</p>
+    {{with $p.Next}}<p class="flex flex-wrap items-center gap-x-2 text-sm text-base-content/70">Next for this change: <a class="link touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .ExecID}}">{{execName .}}</a>{{state "executions.status" .Status}}<span>started {{at .StartedAt}}</span></p>
+    {{else}}{{if and $p.ChangeName (ne $p.Status "running")}}<p class="text-sm text-base-content/70">Nothing has run for this change since.</p>{{end}}{{end}}
+  </div>
+</div>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-12">
+  <div class="flex min-w-0 flex-col gap-6 lg:col-span-8">
+    <section class="min-w-0" aria-labelledby="out-title">
+      <h2 id="out-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "terminal" "size-4 text-primary"}}Output</h2>
+      {{if $p.LogPrunedAt}}<div role="alert" class="alert alert-soft mb-2 text-sm">{{icon "info"}}<span>The output was removed on {{stamp $p.LogPrunedAt}}: the kit keeps the output of an execution for a limited time.</span></div>{{end}}
+      {{template "viewer" (dict "c" (dict "content" $p.Log.Content "size" $p.Log.Bytes "truncated" $p.Log.Truncated) "name" (printf "%s.log" $p.ExecID) "id" "exec-output" "stream" (and $live (printf "/api/executions/%s/log/stream" $id)) "after" $p.Log.LastID "full" $p.WholeLog "raw" (printf "/api/executions/%s/log?format=text" $id) "empty" (or (and $live "Nothing has been written yet.") "It wrote no output."))}}
+    </section>
+    <section id="exec-events" data-live-region class="card card-border min-w-0 bg-base-100" aria-labelledby="events-title">
+      <div class="card-body gap-3 p-4">
+        <h2 id="events-title" class="card-title font-display text-base">{{iconc "radio-tower" "size-4 text-primary"}}Events</h2>
+        {{if $p.Events}}
+        <ul class="list">
+          {{range $p.Events}}{{template "event_line" (dict "e" . "exec" false)}}{{end}}
+        </ul>
+        {{else}}<p class="text-sm text-base-content/60">No event names this execution.</p>{{end}}
+      </div>
+    </section>
+    {{if $p.PromptText}}
+    <section class="min-w-0" aria-labelledby="prompt-title">
+      <h2 id="prompt-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "message-square-text" "size-4 text-primary"}}Prompt</h2>
+      {{template "viewer" (dict "c" (dict "content" $p.PromptText) "name" "prompt.md" "md" "source" "id" "exec-prompt")}}
+    </section>
+    {{end}}
+  </div>
+
+  <div class="flex min-w-0 flex-col gap-6 lg:col-span-4">
+    <section id="exec-attempts" data-live-region class="card card-border bg-base-100" aria-labelledby="attempts-title">
+      <div class="card-body gap-3 p-4">
+        <h2 id="attempts-title" class="card-title font-display text-base">{{iconc "repeat-2" "size-4 text-primary"}}Attempts</h2>
+        {{if $p.Attempts}}
+        <ol class="flex flex-col gap-3">
+          {{range $p.Attempts}}
+          <li class="flex flex-col gap-1 border-l-2 border-base-content/15 pl-3 text-sm">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="flex items-center gap-1.5 font-medium">{{agentIcon .Engine "size-4"}}{{.Engine}}</span>
+              {{if .TryNo}}<span class="text-xs text-base-content/60">retry {{.TryNo}}</span>{{end}}
+              {{if .Outcome}}{{state "execution_attempts.outcome" .Outcome}}{{else}}{{badge "running" "info"}}{{end}}
+            </div>
+            <p class="text-xs text-base-content/60">started {{at .StartedAt}} · {{if .FinishedAt}}took{{else}}running for{{end}} <span class="tabular-nums">{{took .StartedAt .FinishedAt $.ReadAt}}</span>{{if .FinishedAt}} · exit {{.ExitCode}}{{end}}</p>
+            {{range .IdlePeriods}}<p class="text-xs text-base-content/70">No activity for <b class="tabular-nums">{{seconds .Seconds}}</b> from {{clock .StartedAt}}: {{if .EndedBy}}{{(word "attempt_idle_periods.ended_by" .EndedBy).Text}}{{else}}idle now, stopped at {{seconds .LimitSeconds}}{{end}}.</p>{{end}}
+          </li>
+          {{end}}
+        </ol>
+        {{else if eq $p.Kind "portal_job"}}<p class="text-sm text-base-content/60">An operation of the kit runs no agent of its own. The agents it starts are executions of their own.</p>
+        {{else}}<p class="text-sm text-base-content/60">No engine has been tried yet.</p>{{end}}
+      </div>
+    </section>
+
+    <section class="card card-border bg-base-100" aria-labelledby="origin-title">
+      <div class="card-body gap-3 p-4">
+        <h2 id="origin-title" class="card-title font-display text-base">{{iconc "route" "size-4 text-primary"}}Where it comes from</h2>
+        <dl class="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+          {{if $p.ChangeName}}<dt class="text-base-content/70">Change</dt><dd>{{template "change_link" $p.ChangeName}}</dd>{{end}}
+          {{with $p.Run}}<dt class="text-base-content/70">Worker run</dt><dd class="flex flex-wrap items-center gap-x-2 gap-y-1"><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/changes/{{enc .ChangeName}}#run-{{.ID}}">#{{.ID}}, {{(word "change_runs.origin" .Origin).Text}}</a>{{if .Result}}{{state "change_runs.result" .Result}}{{else}}<span>still open</span>{{end}}</dd>{{end}}
+          {{if $p.CycleStamp}}<dt class="text-base-content/70">Cycle</dt><dd><a class="link link-hover font-mono touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/cycles/{{enc $p.CycleStamp}}">{{$p.CycleStamp}}</a></dd>{{end}}
+          {{with $p.Parent}}<dt class="text-base-content/70">{{if eq $p.ParentRelation "rerun"}}Repeats{{else}}Continues{{end}}</dt><dd><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .ExecID}}">{{or (firstLine .Summary) (firstLine .PromptText) .ExecID}}</a></dd>{{end}}
+          {{if $p.CommandText}}<dt class="text-base-content/70">Command</dt><dd><code class="break-all font-mono text-xs">{{$p.CommandText}}</code></dd>{{end}}
+          {{if $p.Workdir}}<dt class="text-base-content/70">Ran in</dt><dd><code class="break-all font-mono text-xs">{{$p.Workdir}}</code></dd>{{end}}
+          {{if $p.PromptVersion}}<dt class="text-base-content/70">Prompt version</dt><dd><code class="font-mono text-xs">{{$p.PromptVersion}}</code></dd>{{end}}
+          {{if $p.MemoryVersion}}<dt class="text-base-content/70">Memory version</dt><dd><code class="font-mono text-xs">{{$p.MemoryVersion}}</code></dd>{{end}}
+          <dt class="text-base-content/70">Started</dt><dd class="text-xs">{{stamp $p.StartedAt}}</dd>
+          {{if $p.FinishedAt}}<dt class="text-base-content/70">Ended</dt><dd class="text-xs">{{stamp $p.FinishedAt}}, exit {{$p.ExitCode}}</dd>{{end}}
+          <dt class="text-base-content/70">Process</dt><dd class="text-xs">{{if $p.PID}}pid {{$p.PID}}{{with $p.Host}} on {{.}}{{end}}{{else}}{{with $p.Host}}on {{.}}{{else}}not recorded{{end}}{{end}}</dd>
+          <dt class="text-base-content/70">Id</dt><dd><code class="break-all font-mono text-xs">{{$p.ExecID}}</code></dd>
+        </dl>
+        {{with $p.Continuations}}
+        <h3 class="mt-1 text-sm font-semibold">What followed it</h3>
+        <ul class="flex flex-col gap-2">
+          {{range .}}<li class="flex flex-wrap items-center gap-2 text-sm">{{if eq .ParentRelation "rerun"}}{{badge "run again" "info"}}{{else}}{{badge "follow-up" "info"}}{{end}}<a class="link link-hover min-w-0 truncate touch:py-3" href="{{execHref .ExecID}}">{{or (firstLine .Summary) (firstLine .PromptText) .ExecID}}</a>{{state "executions.status" .Status}}</li>{{end}}
+        </ul>
+        {{end}}
+      </div>
+    </section>
+
+    {{with $p.Repair}}
+    <section class="card card-border bg-base-100" aria-labelledby="repair-title">
+      <div class="card-body gap-3 p-4">
+        <h2 id="repair-title" class="card-title font-display text-base">{{iconc "wrench" "size-4 text-primary"}}Repair round {{.RoundNo}}</h2>
+        <p class="text-sm">Asked because of <b>{{label .AskedReason}}</b>. {{if .ResultPassed}}{{badge "the gates passed afterwards" "success"}}{{else}}{{badge "not fixed" "error"}}{{with .ResultNextReason}} <span class="text-base-content/70">Then: {{label .}}.</span>{{end}}{{end}}</p>
+        {{with .AskedDetails}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-1.5 text-xs font-medium touch:py-3.5">Show what the agent was asked to fix</summary><div class="collapse-content"><pre class="max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-xs">{{.}}</pre></div></details>{{end}}
+        {{with .ChangedDiffstat}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-1.5 text-xs font-medium touch:py-3.5">Show what it changed</summary><div class="collapse-content"><pre class="max-h-72 overflow-auto whitespace-pre font-mono text-xs">{{.}}</pre></div></details>{{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{with $p.GateRounds}}
+    <section class="card card-border bg-base-100" aria-labelledby="gates-title">
+      <div class="card-body gap-3 p-4">
+        <h2 id="gates-title" class="card-title font-display text-base">{{iconc "shield-check" "size-4 text-primary"}}Verification</h2>
+        <p class="text-xs text-base-content/60">The gates that ran on the work of this execution.</p>
+        {{range .}}
+        <div class="flex flex-col gap-1.5 text-sm">
+          <div class="flex flex-wrap items-center gap-2"><a class="link link-hover font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/gates/{{.ID}}">Gates #{{.ID}}</a>{{if .Result}}{{state "gate_rounds.result" .Result}}{{else}}{{badge "running" "info"}}{{end}}<span class="text-xs text-base-content/60">{{at .StartedAt}} · <span class="tabular-nums">{{took .StartedAt .FinishedAt $.ReadAt}}</span></span></div>
+          <ul class="flex flex-col gap-1">
+            {{range .Runs}}
+            <li class="flex flex-col gap-1">
+              <span class="flex flex-wrap items-center gap-x-2 text-xs">{{if eq .ExitCode 0}}{{iconc "circle-check" "size-3.5 shrink-0 text-success"}}{{else}}{{iconc "octagon-alert" "size-3.5 shrink-0 text-error"}}{{end}}<span class="font-mono">{{.RepoName}} · {{.GateName}}</span><span class="text-base-content/60 tabular-nums">{{millis .DurationMS}}</span>{{if ne .ExitCode 0}}<span class="text-error">exit {{.ExitCode}}</span>{{end}}</span>
+              {{with .FailureExcerpt}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-1.5 text-xs font-medium touch:py-3.5">Show the failure</summary><div class="collapse-content"><pre class="max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-xs">{{.}}</pre></div></details>{{end}}
+            </li>
+            {{end}}
+          </ul>
+        </div>
+        {{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{with $p.Evaluations}}
+    <section class="card card-border bg-base-100" aria-labelledby="eval-title">
+      <div class="card-body gap-3 p-4">
+        <h2 id="eval-title" class="card-title font-display text-base">{{iconc "scale" "size-4 text-primary"}}Evaluator</h2>
+        <ul class="flex flex-col gap-2">
+          {{range .}}<li class="flex flex-wrap items-center gap-2 text-sm">{{state "evaluations.status" .Status}}<span>{{label .Gate}}</span><span class="text-xs text-base-content/60">{{with .Mode}}{{.}} · {{end}}{{if .Cached}}answered from the cache{{else}}{{usd .CostUSD}}{{end}}</span></li>{{end}}
+        </ul>
+      </div>
+    </section>
+    {{end}}
+
+    {{if $p.CanContinue}}
+    <section class="card card-border bg-base-100" aria-labelledby="cont-title">
+      <form class="card-body gap-4 p-4" method="post" data-api="/api/executions/{{$id}}/continue" data-bool="with_context" data-toast="Follow-up started">
+        <h2 id="cont-title" class="card-title font-display text-base">{{iconc "send" "size-4 text-primary"}}Continue this run</h2>
+        <fieldset class="fieldset">
+          <label class="label" for="cont-prompt">Follow-up</label>
+          <textarea id="cont-prompt" name="prompt" rows="5" required class="textarea validator w-full" placeholder="The test still fails on Linux; check the locale of the subprocess and fix it."></textarea>
+          <p class="validator-hint hidden">Write the follow-up for the agent.</p>
+          <label class="label" for="cont-engine">Agent</label>
+          <select id="cont-engine" name="engine" class="select w-full touch:min-h-11">{{template "engine_options" (dict "engines" $p.Engines "sel" "" "same" (or $p.EngineUsed $p.Agent "auto"))}}</select>
+          <label class="label mt-2 cursor-pointer gap-2 whitespace-normal touch:min-h-11"><input type="checkbox" name="with_context" checked class="toggle toggle-sm">Give the agent the previous prompt and the end of its output</label>
+        </fieldset>
+        <div class="card-actions"><button type="submit" class="btn btn-primary btn-sm touch:min-h-11">{{icon "send"}}Send the follow-up</button></div>
+      </form>
+    </section>
+    {{end}}
+  </div>
+</div>
+{{end}}

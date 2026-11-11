@@ -1,0 +1,19 @@
+# Runtime state of the Foreman stays out of git: its logs and state
+# (log/.keep keeps the directory) and the worktrees where changes are built.
+/log/*
+!/log/.keep
+/.worktrees/
+# A kit upgrade puts a changed template beside your file as <file>.new: review it, merge
+# what you need, delete it. It is never committed.
+*.new
+
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Local secrets and settings
+.env
+.env.*
+!.env.example

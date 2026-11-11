@@ -1,0 +1,63 @@
+# repos/<repo-name>/repo.config.yaml
+name: "web"            # e.g. "backend", "frontend", "infra"
+stack: "rails"          # e.g. "python-fastapi", "nextjs-typescript", "go-web-gin", "go-cli-cobra", "rails"
+base_branch: "main"   # the branch the merger pushes to, e.g. "main"
+# web: an HTTP application QA opens in a browser. cli: a terminal program QA runs with
+# arguments and checks its output, exit code and files; a change touching only cli
+# repositories is not queued for the visual QA session.
+kind: "web"             # web | cli
+
+# Optional: a script of this repository, sourced from its root before each of its commands
+# (the gates below, the dev command, and `openspec-kit exec <repo> <command>`). It
+# activates the toolchain the repository pins (Ruby, Node, Python, Go versions, gemsets) and
+# exports what its commands need. Start from config/templates/repo_env.sh of the kit.
+# Agents may not change it: the merger blocks a change that does. Empty: plain shell.
+env_script: "script/env.sh"
+
+# How to run it: a web server (dev_command, port, health_endpoint), or for a cli, the
+# command that runs the program; QA appends its arguments. A cli leaves port and health empty.
+service:
+  dev_command: "bin/rails server -p $PORT"         # e.g. "pnpm dev", "go run ./cmd/server", "go run ./cmd/mytool"
+  port: "3000"                   # quoted: an unquoted {{...}} is invalid YAML
+  health_endpoint: "http://localhost:3000/up" # e.g. "http://localhost:3000/up"
+  # The visual QA session runs the application from .worktrees/_visual_qa, a clone without
+  # untracked files: openspec-kit visual-qa begin runs this there first, on the session's slot,
+  # with OPENSPEC_MAIN_ROOT set to the main checkout. A failure stops the session before it
+  # takes any check. e.g. "pnpm install --frozen-lockfile", or "ln -sf
+  # $OPENSPEC_MAIN_ROOT/repos/core/config/application.yml config/ && bin/rails db:prepare"
+  prepare: "ln -sf $OPENSPEC_MAIN_ROOT/repos/web/config/application.yml config/ && bin/rails db:prepare"
+
+# What its gates need running (a database, a search engine), as name: command. The preflight
+# runs each through env_script, with 30 seconds to answer, before a cycle judges or dispatches,
+# and the visual session before it begins: one that fails stops them with its name, and the
+# next run checks again. e.g. postgres: "pg_isready -h localhost -p 5432"
+requires:
+  postgres: "pg_isready -h localhost -p 5432"
+
+# Run in this order when this repo has changes: setup, lint, typecheck, test, build, then any
+# extra keys. They run after every BUILD and again at merge, so keep them fast: each command
+# sees OPENSPEC_CHANGED_FILES (this repo's files the change touched, one per line) to run only
+# the related tests, e.g. "bundle exec rspec $(script/related_specs)". Several changes build
+# at once: each one sees OPENSPEC_SLOT, from which env_script derives its own test database.
+# Empty values and un-instantiated {{...}} placeholders are skipped with a warning.
+gates:
+  setup: "RAILS_ENV=test bin/rails db:prepare"   # this slot's test database
+  lint: "bundle exec rubocop"               # e.g. "pnpm lint", "ruff check .", "golangci-lint run"
+  typecheck: ""     # e.g. "pnpm tsc --noEmit", "mypy .", "cargo check"
+  test: "bundle exec rspec $(script/related_specs)"               # e.g. "pnpm test", "pytest", "go test ./..."
+  build: ""             # e.g. "pnpm build", "cargo build"
+  secrets: "gitleaks detect --no-banner --redact --source ."   # recommended extra gate: committed secrets
+
+# The cycle's regression sweep (openspec-kit gates --all --regression) runs these once per
+# cycle instead of the gates, after gates.setup: usually the full suite. Empty: the gates.
+regression:
+  test: "bundle exec rspec"         # e.g. "bundle exec rspec", "pnpm test", "pytest"
+
+# Paths whose change runs the regression too, after the gates, at every BUILD and at merge: a
+# change there can break what no related test covers (a validation, a boot default, a
+# migration). Globs relative to this repository; ** matches any depth. Empty: never.
+# An entry starting with ! is an exclusion: a changed file runs the regression only if it
+# matches some entry and no exclusion, whatever their order. With ["config/**",
+# "!config/locales/**"], config/initializers/x.rb runs it and an accent fixed in
+# config/locales/es.yml does not.
+regression_when: ["app/models/**", "config/**", "!config/locales/**", "db/migrate/**"]

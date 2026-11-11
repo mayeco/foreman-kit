@@ -1,0 +1,86 @@
+{{/* Assessments: which gates fail and how long they take, and how the evaluator answers, since a
+     date. It draws .Page, the struct its read returns (internal/portal/page_quality.go):
+     numbers the database adds up from the rows of gate runs and of evaluations. */}}
+
+{{define "quality"}}{{$p := .Page}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Assessments</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">Which gates fail and how long they take, and how the evaluator answers: {{if $p.Since}}what was recorded since {{at $p.Since}}{{else}}everything on record{{end}}.</p>
+  </div>
+  <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="Period">
+    {{range $p.Periods}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}</a>{{end}}
+  </div>
+</header>
+
+<div class="flex flex-col gap-6">
+  <section aria-labelledby="quality-gates-title">
+    <h2 id="quality-gates-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "flask-conical" "size-4 text-primary"}}Gates</h2>
+    <div class="card card-border min-w-0 bg-base-100">
+      {{if $p.Gates}}
+      {{with $p.GateSum}}
+      <p class="border-b border-base-content/10 px-4 py-3 text-sm text-base-content/80">{{count .Runs "run" "runs"}} of {{count .Gates "gate" "gates"}} in {{count .Repos "repository" "repositories"}}{{if .Failures}}: <span class="font-medium text-error">{{.Failures}} failed</span>, {{share .Failures .Runs}} of them{{else}}, and none failed{{end}}. Together they took <span class="tabular-nums">{{millis .TotalMS}}</span>.</p>
+      {{end}}
+      <div class="max-w-full overflow-x-auto">
+        <table class="table table-stack table-stack-beside">
+          <thead><tr><th>Gate</th><th>Runs</th><th>Failed</th><th>Average</th><th>Longest</th><th>In all</th><th>Last run</th><th>Last failure</th></tr></thead>
+          <tbody>
+            {{range $p.Gates}}
+            <tr class="align-top hover:bg-base-200/60">
+              <td class="min-w-48">
+                {{if .Changes}}
+                <span class="font-medium"><span class="font-mono">{{.RepoName}}</span> · the specs of each change</span>
+                <p class="mt-0.5 text-xs text-base-content/60">validated for {{count .Changes "change" "changes"}}</p>
+                {{else}}<span class="font-mono font-medium">{{.RepoName}} · {{.GateName}}</span>{{end}}
+              </td>
+              <td class="tabular-nums">{{.Runs}}</td>
+              <td>{{if .Failures}}<span class="whitespace-nowrap tabular-nums"><span class="font-medium text-error">{{.Failures}}</span> <span class="text-xs text-base-content/60">{{share .Failures .Runs}}</span></span>{{else}}<span class="text-base-content/60">none</span>{{end}}</td>
+              <td class="whitespace-nowrap tabular-nums">{{millis .AvgMS}}</td>
+              <td class="whitespace-nowrap tabular-nums">{{millis .MaxMS}}</td>
+              <td class="whitespace-nowrap tabular-nums">{{millis .TotalMS}}</td>
+              <td class="whitespace-nowrap text-sm">{{at .LastRunAt}}</td>
+              <td class="whitespace-nowrap text-sm">{{if .LastFailedRoundID}}<a class="link touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/gates/{{.LastFailedRoundID}}">{{at .LastFailedAt}}<span class="sr-only">, in the round of gates #{{.LastFailedRoundID}}</span></a>{{else}}<span class="text-base-content/60">none in this period</span>{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}{{template "empty" (dict "icon" "flask-conical" "title" "No gate ran in this period." "text" "A gate runs when a worker verifies what it built, when the merger integrates a change and when a person starts the gates.")}}{{end}}
+    </div>
+  </section>
+
+  <section aria-labelledby="quality-evaluator-title">
+    <h2 id="quality-evaluator-title" class="mb-2 flex items-center gap-2 font-display text-base font-semibold">{{iconc "scale" "size-4 text-primary"}}The evaluator</h2>
+    <div class="card card-border min-w-0 bg-base-100">
+      {{if $p.Evaluations}}
+      {{with $p.EvalSum}}
+      <p class="border-b border-base-content/10 px-4 py-3 text-sm text-base-content/80">{{count .Evaluations "question" "questions"}} on {{count .Gates "gate" "gates"}}: it approved {{.Passed}}{{if lt .Passed .Evaluations}}, {{share .Passed .Evaluations}} of them{{end}}. {{if .Cached}}{{.Cached}} of its answers came from the cache. {{end}}They cost <span class="tabular-nums">{{usd .CostUSD}}</span>.</p>
+      {{end}}
+      <div class="max-w-full overflow-x-auto">
+        <table class="table table-stack table-stack-beside">
+          <thead><tr><th>Gate</th><th>Asked</th><th>Approved</th><th>Other answers</th><th>Actions</th><th>Cached</th><th>Cost</th><th>Last asked</th></tr></thead>
+          <tbody>
+            {{range $p.Evaluations}}{{$e := .}}
+            <tr class="align-top hover:bg-base-200/60">
+              <td class="min-w-40">
+                <span class="font-medium">{{label .Gate}}</span>
+                {{if .ByMode}}<p class="mt-0.5 flex flex-wrap gap-x-2 text-xs text-base-content/60">{{range $mode, $n := .ByMode}}<span>{{(word "evaluations.mode" $mode).Text}}{{if gt (len $e.ByMode) 1}} for {{$n}}{{end}}</span>{{end}}</p>{{end}}
+              </td>
+              <td class="tabular-nums">{{.Evaluations}}</td>
+              <td><span class="whitespace-nowrap tabular-nums">{{.Passed}} <span class="text-xs text-base-content/60">{{share .Passed .Evaluations}}</span></span></td>
+              <td>{{if lt .Passed .Evaluations}}<span class="flex flex-wrap items-center gap-x-3 gap-y-1">{{range $status, $n := .ByStatus}}{{if ne $status "passed"}}<span class="inline-flex items-center gap-1.5">{{state "evaluations.status" $status}}<span class="tabular-nums">{{$n}}</span></span>{{end}}{{end}}</span>{{else}}<span class="text-base-content/60">none</span>{{end}}</td>
+              <td>{{if .ByRoute}}<span class="flex flex-wrap items-center gap-x-3 gap-y-1">{{range $action, $n := .ByRoute}}<span class="inline-flex items-center gap-1.5"><span class="badge badge-sm badge-ghost whitespace-nowrap">{{label $action}}</span><span class="tabular-nums">{{$n}}</span></span>{{end}}</span>{{else}}<span class="text-base-content/60">none</span>{{end}}</td>
+              <td class="tabular-nums">{{.Cached}}</td>
+              <td class="whitespace-nowrap tabular-nums">{{usd .CostUSD}}</td>
+              <td class="whitespace-nowrap text-sm">{{at .LastAt}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      <p class="border-t border-base-content/10 px-4 py-3 text-xs text-base-content/60">The orchestrator acts on the answers of an enforced gate, and only records the answers of an advisory one. An action is what a rule of the gate made it do with an answer: an approved change can still be sent to a person. Each answer is in the story of its change and in <a class="link" href="/events?event=evaluator.answer">the events of the evaluator</a>.</p>
+      {{else}}{{template "empty" (dict "icon" "scale" "title" "The evaluator was not asked in this period." "text" "The orchestrator asks it at the gates of the evaluator that are on, and each question appears here with its answer.")}}{{end}}
+    </div>
+  </section>
+</div>
+{{end}}

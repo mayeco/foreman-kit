@@ -1,0 +1,89 @@
+# ==============================================================================
+# .foreman-kit/pipeline.yaml - How a change travels from the backlog to the base branch
+# ==============================================================================
+# Seed: created once by `foreman-kit init`, then owned by this application.
+# Read by the dispatcher and the merger. Every key is written here: one that is
+# missing or invalid stops them from starting new work (`foreman-kit config check`
+# names it). Change a value with `foreman-kit config set pipeline.<key> <value>`.
+# Times are written with their unit: 30s, 15m, 2h.
+
+repository:
+  # The branch of this repository that every change starts from and the merger
+  # publishes to. It has no value of the kit's own: set it to this application's.
+  # Each child repository names its own base branch in its repo.config.yaml.
+  base_branch: main
+  remote: origin # the git remote the kit fetches from and pushes to
+  worktrees_dir: .worktrees # where the worktree of each change lives
+  # Paths of a child repository a change may not touch, besides its env_script.
+  protected_paths: [repo.config.yaml, .github, .gitlab-ci.yml]
+
+dispatch:
+  workers: 2 # changes built at the same time
+  # A backlog item is ordered one priority higher (low, normal, high, critical) each
+  # time it has waited this long, so a steady flow of higher ones does not starve it.
+  # Its priority in the backlog does not change. never: off
+  priority_bump_every: 6h
+
+build:
+  # Times a phase is sent back to its agent after it fails (PLAN: validation, BUILD:
+  # gates) before the change is blocked. 0: never sent back
+  repair_rounds: 2
+
+gates:
+  timeout: 45m # one repository's gates: in a worker, at merge and on a base alone
+
+blocked_changes:
+  # A change blocked for a reason that can heal on its own (gate_failure,
+  # incomplete_tasks, spec_invalid, plan_review, scenario_coverage, repair_stalled,
+  # rebase_conflict, push_failed, manifest_stale) runs again this many times, from its
+  # kept worktree with fresh repair rounds, its first agent call told what stopped it.
+  # Never a policy_violation, spec_ambiguity, risk_review, missing_child_commits or a
+  # system failure: those wait for a person. 0: it waits for a person
+  retries: 1
+  retry_after: 1h # how long it waits before each of those runs; 0s: the next dispatch
+
+merge:
+  # Commits pushed to a child repository outside the pipeline (a hotfix). The merger
+  # always rebases a change onto the repository's current base branch, so they are
+  # integrated with the next change that touches the repository either way; this
+  # decides whether and how they are tested.
+  #   verify   tested once on their own. When their files trigger the repository's
+  #            regression, the merger runs it on the base alone before the change's
+  #            gates; when a gate fails at merge, it reruns that gate on the base alone
+  #            to tell whether the hotfix or the change broke it. A base that fails
+  #            holds that repository's ready changes (never blocked, retries untouched)
+  #            with one alert in foreman-kit status; they resume when the base moves,
+  #            when its one recheck passes, or with foreman-kit base accept <repo>.
+  #            An accepted base covers the tests that failed on it alone, until another
+  #            commit is pushed outside the pipeline.
+  #   ignore   integrated with the next change, never tested as part of it: only the
+  #            change's own commits count for its diff-aware tests and its regression.
+  #   include  counted as that change's own, and tested with it (more conservative: a
+  #            hotfix that breaks the regression blocks every later change of the
+  #            repository).
+  # Gates that do not read FOREMANKIT_CHANGED_FILES run in full either way.
+  outside_commits: verify
+  # A base that fails on its own is checked again once, this long after. never: only
+  # when it moves or a person accepts it
+  base_recheck_after: 1h
+  # A change whose code no longer rebases onto the base branch (another change edited
+  # the same lines first) is rebuilt on the new base this many times before it waits
+  # for a person as rebase_conflict. 0: never rebuilt
+  conflict_rebuilds: 3
+
+locks:
+  # A lock whose owner has not renewed it for this long may be taken by another
+  # process: the dispatcher's, the merger's and each change's
+  stale_after: 2h
+
+diagnostics:
+  # A model that explains a failure in words (a failing gate, a refusal by the
+  # evaluator, a rebase conflict) and audits a plan. It never writes code: the agents
+  # do. Its API key comes from the environment (FOREMANKIT_DIAGNOSTICS_API_KEY, or the
+  # provider's own variable).
+  enabled: false
+  provider: openai # openai | anthropic | google | openrouter | ollama | compat
+  model: gpt-4o-mini
+  base_url: "" # only for compat and ollama
+  timeout: 20s # one request
+  retries: 2 # an answer that does not fit what was asked is asked again this many times

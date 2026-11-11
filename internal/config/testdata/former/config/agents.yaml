@@ -1,0 +1,55 @@
+# The agents this application uses, written by install.sh (init, or upgrade --agents).
+# Each one gets the skills in its own directory. The scripts read the roles from here,
+# so the scheduled task always runs the same command. Change the agents with
+# `openspec-kit update --agents ...`; a role, the order and the permissions may be edited by hand.
+# The agents the kit supports (an agent not listed in agents gets no skills here):
+#   claude        Claude Code             skills in .claude/skills/    run: claude -p {{prompt}} --output-format json --permission-mode bypassPermissions --no-session-persistence
+#   codex         OpenAI Codex            skills in .agents/skills/    run: codex exec --dangerously-bypass-approvals-and-sandbox --ephemeral --json -C {{workdir}} {{prompt}}
+#   copilot       GitHub Copilot          skills in .github/skills/    run: copilot -p {{prompt}} --allow-all --no-ask-user --autopilot --output-format json --no-auto-update
+#   hermes        Hermes                  skills in .hermes/skills/    run: hermes -z {{prompt}} --yolo --accept-hooks
+#   opencode      OpenCode                skills in .opencode/skills/  run: opencode run --format json {{prompt}}
+#   agy           Google Antigravity      skills in .agents/skills/    run: agy chat --mode agent -r --yolo {{prompt}}
+#   kilo          Kilo Code               skills in .kilocode/skills/  run: kilo run --auto --format json {{prompt}}
+#   cline         Cline                   skills in .cline/skills/     run: cline -y --json --timeout {{timeout}} -c {{workdir}} {{prompt}}
+#   pi            pi                      skills in .pi/skills/        run: pi -p --no-session --mode json {{prompt}}
+#   omp           oh-my-pi, a fork of pi  skills in .omp/skills/       run: omp -p --no-session --mode json {{prompt}}
+#   crush         Charm's Crush           skills in .crush/skills/     run: crush run -q -y -c {{workdir}} {{prompt}}
+#   cursor-agent  Cursor Agent            skills in .cursor/skills/    run: cursor-agent -p --force --trust --output-format json --workspace {{workdir}} {{prompt}}
+#   zcode         ZCode                   skills in .zcode/skills/     run: zcode -p {{prompt}} --output-format json
+agents: [claude]
+# Each role lists its agents in order of preference. One that fails (out of quota, not
+# logged in, timed out) is tried again limits.agent_retries times (config/pipeline.yaml),
+# then the next one runs and continues from what the failed attempts left.
+roles:
+  plan:  [claude] # writes the OpenSpec artifacts of each backlog item
+  build: [claude] # implements the tasks in the child repositories
+  cycle: [claude] # runs the judgment of the scheduled cycle
+# fallback: every call starts with the first agent of its role, then the next when one
+# fails. random: every call starts with any agent of its role, then the others in the
+# order listed, so the calls spread over the agents' quotas instead of draining the first.
+# spread: like random, but among the agents the fewest running calls use, so changes
+# built at once go to different agents while there are enough of them.
+order: fallback
+# all: agents may run any command (servers, curl, browsers, test tools), except the git
+# commands only the scripts run (commit, push, rebase, reset, checkout, switch).
+# restricted: Claude Code may only read, edit, run openspec, inspect git, run the gates
+# and ask the evaluator; Codex, Antigravity (agy) and Cursor Agent (cursor-agent) keep their sandbox; Kilo, omp and ZCode (zcode) follow their own approval settings; pi loads no project extensions. Hermes, Copilot, OpenCode, Cline and Crush ignore it.
+permissions: all
+# How each agent is executed. Placeholders replaced at runtime:
+#   {{prompt}}       rendered prompt text
+#   {{prompt_file}}  path to temporary file containing the prompt
+#   {{workdir}}      worktree directory where the agent runs
+#   {{timeout}}      limits.agent_seconds
+#   {{budget_usd}}   limits.agent_budget_usd
+# Edit any command below (or add any custom agent binary) without recompiling openspec-kit:
+commands:
+  claude: "claude -p {{prompt}} --output-format json --permission-mode bypassPermissions --no-session-persistence"
+# Arguments added to an agent's command line on every call, besides the kit's own:
+# a model, a provider, a profile. A string is split as a shell would split it; a list
+# is taken as it is. One line per agent, for example:
+#   claude: "--model claude-opus-5-5"
+#   kilo: "-m kilo/~anthropic/claude-sonnet-latest"
+# Or one entry per role (plan, build, cycle); default covers the roles not named and
+# the preflight's ping:
+#   claude: {plan: "--model claude-opus-5-5", build: "--model claude-sonnet-5-5", default: "--model claude-haiku-5-5"}
+extra_args: {}

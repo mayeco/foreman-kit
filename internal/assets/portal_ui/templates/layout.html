@@ -1,0 +1,147 @@
+{{define "layout"}}<!doctype html>
+<html lang="en" data-theme="{{.Theme}}" data-sprite="{{spriteURL}}" class="scroll-smooth">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · OpenSpec Kit</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="/assets/fonts/chakra-petch-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/portal.css">
+  <script src="/assets/portal.js" defer></script>
+</head>
+<body class="min-h-screen bg-base-200 font-sans text-base-content antialiased" data-title="{{.Title}}">
+  <a href="#main" class="btn btn-sm btn-primary fixed left-3 top-3 z-50 -translate-y-20 focus:translate-y-0 touch:min-h-11">Skip to content</a>
+  <div class="drawer lg:drawer-open">
+    <input id="nav-drawer" type="checkbox" class="drawer-toggle" tabindex="-1" aria-hidden="true">
+    <div class="drawer-content flex min-h-screen min-w-0 flex-col">
+      {{template "navbar" .}}
+      <main id="main" tabindex="-1" class="w-full min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8"{{if .Live}} data-live-interval="{{.Live}}"{{end}}>
+        <noscript><div role="alert" class="alert alert-warning mb-5">{{icon "triangle-alert"}}<span>The portal needs JavaScript for its actions: the pages can be read without it, and no button or form does anything.</span></div></noscript>
+        {{.Content}}
+      </main>
+      <footer class="flex flex-wrap items-center justify-between gap-2 border-t border-base-content/10 px-4 py-3 text-xs text-base-content/60 sm:px-6 lg:px-8">
+        <span class="font-mono">foreman-kit · {{.App}}</span>
+        <span class="flex items-center gap-3">
+          {{/* When the page was read, and whether it reads itself again: the script that refreshes it says here when it cannot. */}}
+          <span id="page-read-at" data-live-region class="flex flex-wrap items-center gap-1">{{if not .ReadAt.IsZero}}{{iconc "clock" "size-3"}}read at {{readAt .ReadAt}}{{end}}{{if .Live}}{{if not .ReadAt.IsZero}}<span aria-hidden="true">·</span>{{end}}{{iconc "refresh-cw" "size-3"}}refreshes every {{.Live}}s{{end}}</span>
+          <span class="hidden items-center gap-1 sm:flex">Press <kbd class="kbd kbd-sm">/</kbd> to find a change</span>
+        </span>
+      </footer>
+    </div>
+    <div class="drawer-side z-40">
+      <label for="nav-drawer" aria-hidden="true" class="drawer-overlay"></label>
+      {{template "sidebar" .}}
+    </div>
+  </div>
+
+  <div id="toasts" class="toast toast-end toast-bottom z-50" role="status" aria-live="polite"></div>
+
+  <dialog id="confirm-dialog" class="modal modal-bottom sm:modal-middle" aria-labelledby="confirm-title">
+    <div class="modal-box">
+      <h3 id="confirm-title" class="font-display text-lg font-bold" data-confirm-title>Are you sure?</h3>
+      <p class="py-4 text-sm text-base-content/80" data-confirm-text></p>
+      <div class="modal-action">
+        <form method="dialog" class="flex gap-2">
+          <button class="btn btn-sm btn-ghost touch:min-h-11" value="cancel">Cancel</button>
+          <button class="btn btn-sm btn-primary touch:min-h-11" value="ok" data-confirm-ok>Confirm</button>
+        </form>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button value="cancel">close</button></form>
+  </dialog>
+
+  <dialog id="output-dialog" class="modal" aria-labelledby="output-title">
+    <div class="modal-box w-11/12 max-w-4xl">
+      <h3 id="output-title" class="font-display text-lg font-bold" data-output-title>Output</h3>
+      <pre class="mt-4 max-h-[60vh] overflow-auto rounded-box bg-base-300 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words" data-output-body></pre>
+      <div class="modal-action">
+        <form method="dialog"><button class="btn btn-sm touch:min-h-11">Close</button></form>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <dialog id="pause-dialog" class="modal modal-bottom sm:modal-middle" aria-labelledby="pause-title">
+    <div class="modal-box">
+      <h3 id="pause-title" class="font-display text-lg font-bold">Pause the kit</h3>
+      <p class="py-2 text-sm text-base-content/70">While paused, the kit does not start new cycles, dispatches or merges. Work already running finishes.</p>
+      <form data-api="/api/workspace/pause" data-toast="Paused" class="fieldset">
+        <label class="label" for="pause-reason">Reason (optional)</label>
+        <input id="pause-reason" name="reason" class="input input-sm w-full touch:min-h-11" placeholder="Investigating a gate regression on payments">
+        <div class="modal-action">
+          <button type="button" class="btn btn-sm btn-ghost touch:min-h-11" data-close-dialog>Cancel</button>
+          <button type="submit" class="btn btn-sm btn-error touch:min-h-11">{{icon "pause"}} Pause the kit</button>
+        </div>
+      </form>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+</body>
+</html>{{end}}
+
+{{define "navbar"}}
+<header class="navbar sticky top-0 z-30 min-h-14 gap-2 border-b border-base-content/10 bg-base-100/90 px-2 backdrop-blur sm:px-4">
+  <div class="flex-none lg:hidden">
+    <label for="nav-drawer" role="button" tabindex="0" aria-controls="nav-drawer" aria-expanded="false" aria-label="Open the navigation" class="btn btn-square btn-ghost btn-sm drawer-button touch:min-h-11 touch:min-w-11">{{iconc "menu" "size-5"}}</label>
+  </div>
+  <nav class="breadcrumbs hidden min-w-0 flex-1 overflow-x-hidden text-sm md:block" aria-label="Breadcrumb">
+    <ul class="flex-nowrap">
+      <li class="shrink-0"><a href="/" class="gap-1 touch:min-h-11 touch:min-w-11">{{icon "activity"}}<span>Dashboard</span></a></li>
+      {{range .Crumbs}}<li class="min-w-0">{{if .Href}}<a href="{{.Href}}" class="block max-w-40 truncate touch:min-w-11 touch:py-3">{{.Label}}</a>{{else}}<span class="max-w-60 truncate font-medium" aria-current="page">{{.Label}}</span>{{end}}</li>{{end}}
+    </ul>
+  </nav>
+  <div class="min-w-0 flex-1 md:hidden"><span class="block truncate font-display text-base font-semibold">{{.Title}}</span></div>
+  <a href="/changes" class="btn btn-square btn-ghost btn-sm min-h-11 min-w-11 sm:hidden" aria-label="Search the changes">{{iconc "search" "size-5"}}</a>
+  <form action="/go" method="get" role="search" class="hidden sm:block">
+    <label class="input input-sm w-44 touch:min-h-11 lg:w-64">
+      {{iconc "search" "size-4 opacity-60"}}
+      <input id="goto-input" type="search" name="q" class="grow" placeholder="Find a change" aria-label="Find a change by name">
+      <kbd class="kbd kbd-sm">/</kbd>
+    </label>
+  </form>
+  <div id="kit-status" data-live-region class="flex items-center gap-2">
+    {{if .Paused}}
+      <span class="hidden items-center gap-2 text-xs font-semibold uppercase tracking-wider text-error xl:flex" title="{{.PauseReason}}"><span class="status status-error"></span>Paused</span>
+      <button class="btn btn-sm btn-success touch:min-h-11 touch:min-w-11" data-post="/api/workspace/resume" data-toast="Resumed" data-confirm="{{if .PauseReason}}It was paused: {{.PauseReason}}. {{end}}Once resumed, the cycle, the dispatcher and the merger can start again on their next pass." data-confirm-title="Resume the kit?" data-confirm-ok="Resume">{{icon "play"}}<span class="hidden sm:inline">Resume</span></button>
+    {{else}}
+      <span class="hidden items-center gap-2 text-xs font-semibold uppercase tracking-wider text-success xl:flex"><span class="inline-grid *:[grid-area:1/1]"><span class="status status-success animate-ping"></span><span class="status status-success"></span></span>Active</span>
+      <button class="btn btn-sm btn-soft btn-error touch:min-h-11 touch:min-w-11" data-open-dialog="pause-dialog" aria-label="Pause the kit">{{icon "pause"}}<span class="hidden sm:inline">Pause</span></button>
+    {{end}}
+  </div>
+  <button class="btn btn-sm btn-ghost touch:min-h-11 touch:min-w-11" popovertarget="theme-menu" style="anchor-name:--theme-menu" aria-label="Choose a theme">{{icon "palette"}}<span class="hidden lg:inline">Theme</span></button>
+  <ul id="theme-menu" popover class="dropdown dropdown-end z-50 mt-2 max-h-[70vh] w-60 overflow-y-auto rounded-box border border-base-content/10 bg-base-200 p-2 shadow-2xl" style="position-anchor:--theme-menu">
+    {{range .Themes}}<li><input type="radio" name="theme" class="theme-controller btn btn-sm btn-block btn-ghost justify-start touch:min-h-11" aria-label="{{.Label}}" value="{{.Name}}"{{if eq .Name $.Theme}} checked{{end}}></li>{{end}}
+    <li class="mt-2 border-t border-base-content/10 pt-2"><a href="/system/appearance" class="btn btn-sm btn-block btn-ghost justify-start touch:min-h-11">{{icon "swatch-book"}} Theme gallery</a></li>
+  </ul>
+  <div class="tooltip tooltip-left max-sm:hidden" data-tip="Pages you opened lately"><a href="/recent" class="btn btn-sm btn-square btn-ghost touch:min-h-11 touch:min-w-11" aria-label="Pages you opened lately">{{icon "history"}}</a></div>
+  <div class="tooltip tooltip-left max-sm:hidden" data-tip="Reload this page"><a href="{{.Address}}" class="btn btn-sm btn-square btn-ghost touch:min-h-11 touch:min-w-11" aria-label="Reload this page">{{icon "rotate-cw"}}</a></div>
+</header>
+{{end}}
+
+{{define "sidebar"}}
+<aside class="flex min-h-full w-72 flex-col border-r border-base-content/10 bg-base-300" aria-label="Main navigation">
+  <a href="/" class="group flex items-center gap-3 px-5 pb-4 pt-5">
+    <span class="grid size-10 shrink-0 place-items-center bg-primary text-primary-content [clip-path:polygon(0_0,calc(100%-10px)_0,100%_10px,100%_100%,10px_100%,0_calc(100%-10px))]">{{iconc "git-merge" "size-5"}}</span>
+    <span class="min-w-0">
+      <span class="block font-display text-lg font-bold leading-tight tracking-wide">OpenSpec Kit</span>
+      <span class="block truncate font-mono text-xs text-base-content/60">{{.App}}</span>
+    </span>
+  </a>
+  <ul id="nav-menu" data-live-region class="menu w-full grow gap-0.5 px-3">
+    {{range .Nav}}
+      {{if .Title}}<li class="menu-title mt-3 font-mono text-xs uppercase tracking-[0.18em]">{{.Title}}</li>{{end}}
+      {{range .Items}}
+        <li><a href="{{.Href}}" class="touch:min-h-11{{if $.IsActive .Href}} menu-active{{end}}"{{if $.IsActive .Href}} aria-current="page"{{end}}>{{icon .Icon}}<span class="grow">{{.Label}}</span>{{if .Count}}<span class="{{if eq .Tone "error"}} badge badge-sm badge-error {{else if eq .Tone "success"}} badge badge-sm badge-success {{else}} badge badge-sm badge-warning {{end}} tabular-nums">{{.Count}}</span>{{end}}</a></li>
+      {{end}}
+    {{end}}
+  </ul>
+  <a href="/recent" class="mx-3 hidden items-center gap-2 px-3 text-sm text-base-content/80 max-sm:flex touch:min-h-11">{{icon "history"}}Pages you opened lately</a>
+  <div class="m-3 rounded-box border border-base-content/10 bg-base-100 p-3 text-xs">
+    <div class="flex items-center gap-2 font-semibold">
+      {{if .Paused}}<span class="status status-error"></span><span>Kit paused</span>{{else}}<span class="status status-success"></span><span>Kit active</span>{{end}}
+    </div>
+    <p class="mt-1 text-base-content/60">{{if .Paused}}{{if .PauseReason}}{{.PauseReason}}{{else}}No reason given.{{end}}{{else}}Cycles, dispatcher and merger may start on their next pass.{{end}}</p>
+  </div>
+</aside>
+{{end}}

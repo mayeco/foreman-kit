@@ -1,0 +1,37 @@
+{{define "system_nav"}}
+<div role="tablist" class="tabs tabs-box tabs-sm mb-5 w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="System pages">
+  {{range systemPages}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if $.IsActive .Href}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if $.IsActive .Href}} aria-selected="true"{{end}}>{{icon .Icon}}{{.Label}}</a>{{end}}
+</div>
+{{end}}
+
+{{define "recent"}}
+<header class="mb-5 flex flex-wrap items-end justify-between gap-4">
+  <div>
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Recent</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">Pages you opened lately, newest first. The list lives in this browser only.</p>
+  </div>
+  <button class="btn btn-sm btn-soft btn-error touch:min-h-11" data-recent-clear>{{icon "trash-2"}}Clear history</button>
+</header>
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <div data-recent-sections></div>
+  <label class="input input-sm w-full touch:min-h-11 sm:w-72">{{iconc "text-search" "size-4 opacity-60"}}<input type="search" class="grow" placeholder="Search title or address" aria-label="Search title or address" data-recent-q></label>
+</div>
+<div class="card card-border min-w-0 bg-base-100" data-recent-list>
+  <div class="flex flex-col gap-3 p-4"><div class="skeleton h-4 w-2/3"></div><div class="skeleton h-4 w-1/2"></div><div class="skeleton h-4 w-3/5"></div></div>
+</div>
+<template id="recent-empty">{{template "empty" (dict "icon" "history" "title" "Nothing opened yet." "text" "The pages you visit are listed here, grouped by day.")}}</template>
+<template id="recent-nomatch">{{template "empty" (dict "icon" "text-search" "title" "No page matches." "text" "Clear the search or pick another section.")}}</template>
+{{end}}
+
+{{define "error"}}
+<div class="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
+  <span class="grid size-20 place-items-center bg-error/15 text-error [clip-path:polygon(0_0,calc(100%-14px)_0,100%_14px,100%_100%,14px_100%,0_calc(100%-14px))]">{{if eq .Problem.Code 404}}{{iconc "route" "size-9"}}{{else}}{{iconc "octagon-alert" "size-9"}}{{end}}</span>
+  <p class="font-mono text-sm tracking-[0.3em] text-error">{{.Problem.Code}}</p>
+  <h1 class="font-display text-3xl font-bold">{{if eq .Problem.Code 404}}Signal lost{{else if lt .Problem.Code 500}}The portal cannot answer that{{else}}Something broke{{end}}</h1>
+  <p class="text-base-content/70">{{.Problem.Message}}</p>
+  <div class="flex flex-wrap justify-center gap-2">
+    <a href="/" class="btn btn-sm btn-primary touch:min-h-11">{{icon "activity"}}Go to Dashboard</a>
+    <a href="/changes" class="btn btn-sm touch:min-h-11">{{icon "git-branch"}}Browse changes</a>
+  </div>
+</div>
+{{end}}

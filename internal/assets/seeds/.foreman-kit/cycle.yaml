@@ -1,0 +1,59 @@
+# ==============================================================================
+# .foreman-kit/cycle.yaml - What one cycle does: how long it may take and what it may queue
+# ==============================================================================
+# Seed: created once by `foreman-kit init`, then owned by this application.
+# Read by the cycle (`foreman-kit cycle`, or the daemon). When it runs is in
+# .foreman-kit/daemon.yaml; the browser session has its own file, .foreman-kit/visual_qa.yaml.
+# Every key is written here: one that is missing or invalid stops the cycle from
+# starting (`foreman-kit config check` names it).
+
+budget:
+  # What the judgment is told it may spend verifying delivered work and exploring.
+  # Its hard limit is roles.cycle.timeout in .foreman-kit/agents.yaml.
+  total: 45m
+  exploring: 15m # at least this much of it goes to the strategy of the cycle
+
+queue:
+  max_findings: 3 # findings one cycle queues or proposes; the rest stay in its report
+  # Changes that may be open at once: queued, building, ready for the merger, merging,
+  # blocked or waiting to be rebuilt. The cycle queues what still fits, at most
+  # max_findings. With none left it verifies and reports instead, an approved proposal
+  # waits for room, and the daemon starts no cycle before cycle.every
+  # (.foreman-kit/daemon.yaml). Keep it above dispatch.workers (.foreman-kit/pipeline.yaml), or
+  # some workers never have work.
+  max_open: 8
+
+roadmap:
+  file: ROADMAP.md # the features to build, in priority order; "": no roadmap
+  max_proposals: 1 # roadmap features one cycle proposes
+  max_open: 3 # none while this many roadmap proposals are proposed, approved or queued
+
+proposals:
+  # Who approves the proposals in .foreman-kit/agent_proposals.json (improvements, missing
+  # capabilities, roadmap features) before they are queued:
+  #   evaluator  the evaluator (gate proposal_review of .foreman-kit/evaluator.yaml); what it
+  #              does not approve waits for a person
+  #   human      a person: foreman-kit proposals approve <change>
+  #   nobody     every proposal is queued
+  approved_by: evaluator
+  # Who approves a prompt proposal: an edit of .foreman-kit/prompts/plan.md, build.md or
+  # cycle.md that the cycle bases on evidence (repair rounds, foreman-kit prompt-report).
+  # Once approved, `foreman-kit proposals review` applies and checks it, and the cycle records it.
+  #   human   a person: foreman-kit proposals show <change>, then approve <change>
+  #   nobody  it is applied after the judgment that proposed it
+  prompt_edits_approved_by: human
+
+memory:
+  # The memory is .agent-memory/, kept with agent-memory: agents read it with
+  # `agent-memory fetch`, and the cycle and the visual session write it with
+  # `agent-memory propose`. conventions.md, pitfalls.md and decisions.md hold what
+  # applies to every change. modules/repo-<name>.md and modules/spec-<capability>.md
+  # hold what applies to one child repository or capability; the PLAN and BUILD
+  # prompts point to them, so only the changes that touch that scope read them.
+  # Over a cap, the next cycle and visual session are told to trim that file first.
+  max_chars: 12000 # each of conventions.md, pitfalls.md and decisions.md
+  max_chars_per_scope: 6000 # each file under modules/
+
+# Application skills the cycle uses to verify and explore, for example
+# [live-qa-sweep]. Empty: gates and code reading.
+skills: []

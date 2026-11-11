@@ -1,0 +1,123 @@
+# ==============================================================================
+# .foreman-kit/exploration.yaml - What the cycle and the visual session look for
+# ==============================================================================
+# Seed: created once by `foreman-kit init`, then owned by this application.
+# Every run picks one strategy of its own session: `foreman-kit cycle` injects it
+# into the judgment's prompt (budget.exploring in .foreman-kit/cycle.yaml), and
+# `foreman-kit visual-qa start` hands it to the browser session.
+# Replace these generic strategies with your own: name your modules, screens,
+# flows and paths in each directive, as concretely as you would brief a person.
+#
+# selection: in_order (in this order, one per run) or random (never one of the most
+#            recent half again until the others ran).
+# Each strategy:
+#   slug       unique id, kebab-case
+#   session    who runs it: cycle (the headless judgment) or visual_qa (the browser
+#              session of .foreman-kit/visual_qa.yaml). No strategy changes session on its
+#              own: one of a session that is off does not run.
+#   name       short title
+#   kind       defects       confirmed defects and regressions become backlog items
+#                            (.foreman-kit/agent_backlog.json), built as soon as a worker is free
+#              improvements  findings become proposals (.foreman-kit/agent_proposals.json)
+#              features      missing capabilities become proposals
+#   directive  what to look at and what to look for
+#   enabled    false skips it (default true)
+# Proposals are approved as `proposals.approved_by` in .foreman-kit/cycle.yaml says. To
+# visit a strategy more often, list it again under another slug.
+
+selection: in_order
+
+strategies:
+  - slug: security-and-access-control
+    session: cycle
+    name: Security and access control
+    kind: defects
+    directive: >-
+      Check authentication, session handling and authorization on every entry point:
+      requests without a session, with another user's or tenant's identifiers, with an
+      expired or forged token, and with a role that should not reach the action. Look for
+      records of one user or tenant reachable from another, secrets in logs or responses,
+      and missing rate limits on login and password reset.
+
+  - slug: specs-versus-code
+    session: cycle
+    name: Specifications versus code
+    kind: defects
+    directive: >-
+      Compare openspec/specs with the code. Find requirements whose scenarios no test
+      asserts, requirements the code no longer meets, and behavior users rely on that no
+      requirement describes. Run the gates of the repositories involved to confirm.
+
+  - slug: input-validation-and-data-integrity
+    session: cycle
+    name: Input validation and data integrity
+    kind: defects
+    directive: >-
+      Send empty, oversized, malformed, duplicated and out-of-range values to forms and
+      APIs. Look for missing validations, uniqueness enforced only in code and not in the
+      database, missing foreign keys or NOT NULL constraints, and partial writes when a
+      step fails halfway.
+
+  - slug: missing-capabilities
+    session: visual_qa
+    name: Missing capabilities
+    kind: features
+    directive: >-
+      Read the roadmap and openspec/specs, then use the application as its users would.
+      Find the most valuable capability users need and cannot do yet: a step they must do
+      by hand, a list without the filter or export they need, a flow that stops halfway.
+      Propose it as one cohesive change with acceptance hints.
+
+  - slug: errors-and-logs
+    session: visual_qa
+    name: Errors and logs
+    kind: defects
+    directive: >-
+      Read the application and server logs, the browser console and error pages while
+      exercising the main flows. Look for unhandled exceptions, 5xx responses, stack
+      traces shown to users, retries that never succeed and warnings that hide failures.
+
+  - slug: performance
+    session: cycle
+    name: Performance
+    kind: improvements
+    directive: >-
+      Measure the slowest pages, endpoints and background jobs. Look for N+1 queries,
+      missing indexes on filtered or sorted columns, unbounded lists without pagination,
+      oversized payloads and work done on every request that could be cached.
+
+  - slug: api-contracts
+    session: cycle
+    name: API contracts
+    kind: defects
+    directive: >-
+      Exercise every public and internal API endpoint. Check status codes, error bodies,
+      pagination, sorting, content types and validation messages against the specs and
+      against each other, and look for breaking differences between similar endpoints.
+
+  - slug: user-flows-and-copy
+    session: visual_qa
+    name: User flows and copy
+    kind: improvements
+    directive: >-
+      Walk through the main user journeys from start to finish. Look for confusing or
+      broken steps, missing empty, loading and error states, unclear or inconsistent
+      wording, and actions that need more clicks than they should.
+
+  - slug: accessibility-and-localization
+    session: visual_qa
+    name: Accessibility and localization
+    kind: improvements
+    directive: >-
+      Check labels, headings, focus order, keyboard use, contrast and alternative text on
+      the main screens, and look for untranslated text, hard-coded formats of dates,
+      numbers and currency, and layouts that break with longer translations.
+
+  - slug: test-suite-health
+    session: cycle
+    name: Test suite health
+    kind: improvements
+    directive: >-
+      Run every gate. Look for flaky, slow or skipped tests, critical paths without tests,
+      tests that assert nothing, and gates that pass while the feature they cover is
+      broken.

@@ -1,0 +1,26 @@
+{
+  "name": "foreman-portal-ui",
+  "private": true,
+  "description": "Build tooling for the embedded Web Portal stylesheet, icon sprite and fonts, and the browser tests of its pages. The outputs are committed under internal/assets/portal_ui/ so `go build` never needs Node.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "cd ../.. && PORTAL_BROWSER=1 CGO_ENABLED=0 go test -count=1 -v -run '^TestThePagesInABrowser$' ./internal/portal/",
+    "test:serve": "cd ../.. && PORTAL_BROWSER=serve CGO_ENABLED=0 go test -count=1 -v -timeout 15m -run '^TestThePagesInABrowser$' ./internal/portal/"
+  },
+  "devDependencies": {
+    "@fontsource/chakra-petch": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "@tailwindcss/cli": "4.3.5",
+    "axe-core": "4.14.0",
+    "daisyui": "5.7.50",
+    "lucide-static": "1.70.0",
+    "playwright-core": "1.64.1",
+    "tailwindcss": "4.3.5"
+  }
+}

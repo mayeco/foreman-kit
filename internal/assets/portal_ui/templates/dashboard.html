@@ -1,0 +1,255 @@
+{{/* Dashboard: what the kit is doing at this instant, and what it closed last. It draws .Page,
+     the struct its read returns (internal/portal/page_dashboard.go). What waits for a person is
+     counted here and listed in Needs you. */}}
+
+{{/* One stage of the pipeline with how many changes are in it. Takes a stage. */}}
+{{define "dashboard_stage"}}
+<li class="sm:[clip-path:polygon(0_0,calc(100%-14px)_0,100%_50%,calc(100%-14px)_100%,0_100%,14px_50%)] sm:first:[clip-path:polygon(0_0,calc(100%-14px)_0,100%_50%,calc(100%-14px)_100%,0_100%)] sm:last:[clip-path:polygon(0_0,100%_0,100%_100%,0_100%,14px_50%)]">
+  <a href="/changes?state={{.State}}" class="flex h-full flex-col gap-1 px-5 py-4 focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-current sm:px-7 {{if and .Count (or (eq .State "building") (eq .State "merging"))}} bg-primary text-primary-content hover:bg-primary/90 {{else}} bg-base-100 hover:bg-base-300 {{end}}">
+    <span class="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em]">{{iconc .Icon "size-4"}}{{.Label}}</span>
+    <span class="font-display text-4xl font-bold leading-none tabular-nums">{{.Count}}</span>
+  </a>
+</li>
+{{end}}
+
+{{/* What a person starts by hand. Each button is the one partial of its action. */}}
+{{define "kit_actions"}}
+<div class="flex flex-wrap gap-2">
+  <button class="btn btn-sm touch:min-h-11" data-post="/api/cycles" data-toast="Cycle started">{{icon "orbit"}}Run a cycle</button>
+  <button class="btn btn-sm touch:min-h-11" data-post="/api/dispatcher/runs" data-confirm="Start the dispatcher now? It plans and builds the next changes of the backlog, each in its own worktree." data-confirm-title="Run the dispatcher?" data-confirm-ok="Start it" data-toast="Dispatcher started">{{icon "send"}}Run the dispatcher</button>
+  <button class="btn btn-sm touch:min-h-11" data-post="/api/merger/runs" data-toast="Merger started">{{icon "git-merge"}}Run the merger</button>
+</div>
+{{end}}
+
+{{/* One outcome in the list of the latest. dict: o (store.Outcome), at (when the page was read) */}}
+{{define "outcome_line"}}{{$o := .o}}
+<li class="list-row items-center gap-3 text-sm">
+  <span class="w-24 shrink-0 text-xs text-base-content/60 tabular-nums max-sm:w-14 max-sm:[&>time]:whitespace-normal">{{at $o.At}}</span>
+  {{if eq $o.Kind "run"}}{{with $o.Run}}
+  <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+    {{iconc "hammer" "size-4 shrink-0 text-base-content/60"}}{{template "change_link" .ChangeName}}{{state "change_runs.result" .Result}}
+    <a class="link link-hover text-xs touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/changes/{{enc .ChangeName}}#run-{{.ID}}">worker run #{{.ID}}, took {{took .StartedAt .FinishedAt $.at}}</a>
+  </div>
+  {{end}}{{else if eq $o.Kind "merge"}}{{with $o.Merge}}
+  <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+    {{iconc "git-merge" "size-4 shrink-0 text-base-content/60"}}{{template "change_link" .ChangeName}}{{state "merge_attempts.result" .Result}}
+    {{with .IntegratedCommit}}<code class="font-mono text-xs">{{printf "%.10s" .}}</code>{{end}}
+    <a class="link link-hover text-xs touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/changes/{{enc .ChangeName}}#merge-{{.ID}}">merge attempt #{{.ID}}</a>
+  </div>
+  {{end}}{{else if eq $o.Kind "block"}}{{with $o.Block}}
+  <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+    {{iconc "octagon-alert" "size-4 shrink-0 text-error"}}{{template "change_link" .ChangeName}}
+    <span>blocked: {{label .Reason}}{{with .Stage}}, at the {{label .}} stage{{end}}</span>
+    {{if .Resolution}}{{state "change_blocks.resolution" .Resolution}}{{else}}{{badge "in force" "error"}}{{end}}
+  </div>
+  {{end}}{{else if eq $o.Kind "cycle"}}{{with $o.Cycle}}
+  <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+    {{iconc "orbit" "size-4 shrink-0 text-base-content/60"}}
+    <a class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/cycles/{{enc .Stamp}}">cycle {{.Stamp}}</a>
+    <span>{{label .Outcome}}{{with .Strategy}}, on {{label .}}{{end}}</span>
+    <span class="text-xs text-base-content/60">{{count .FindingsCount "finding" "findings"}}{{with .Trigger}} · {{(word "cycles.trigger" .).Text}}{{end}}</span>
+  </div>
+  {{end}}{{end}}
+</li>
+{{end}}
+
+{{define "dashboard"}}{{$p := .Page}}{{$w := $p.Waiting}}
+<div class="flex flex-col gap-6">
+  <header class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <h1 class="font-display text-2xl font-bold sm:text-3xl">Dashboard</h1>
+      <p id="dashboard-status" data-live-region class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-base-content/70">
+        {{if .Paused}}<span class="flex items-center gap-2 font-semibold text-error"><span class="status status-error" aria-hidden="true"></span>The kit is paused{{with .PauseReason}}: {{.}}{{end}}</span>
+        {{else}}<span class="flex items-center gap-2 font-semibold text-success"><span class="inline-grid *:[grid-area:1/1]" aria-hidden="true"><span class="status status-success animate-ping"></span><span class="status status-success"></span></span>The kit is active</span>{{end}}
+        <span class="font-mono">{{.App}}</span>
+      </p>
+    </div>
+    {{template "kit_actions"}}
+  </header>
+
+  {{/* A configuration file a process cannot use stops that process the way a pause does: it is
+       said here, as the process says it, with the way to the settings. */}}
+  <div id="dashboard-config" data-live-region class="contents">
+    {{with $p.ConfigWaits}}
+    <div role="alert" class="alert alert-vertical items-start border-error/60 bg-error/10 sm:alert-horizontal">
+      {{iconc "octagon-alert" "size-6 text-error"}}
+      <div class="flex min-w-0 flex-col gap-1 text-start text-base-content">
+        <h2 class="font-display text-lg font-semibold">{{count (len .) "process starts" "processes start"}} nothing new until the configuration is mended</h2>
+        <ul class="flex flex-col gap-1 text-sm">{{range .}}<li class="break-words"><span class="font-medium">{{.Process}}:</span> {{.Why}}</li>{{end}}</ul>
+      </div>
+      <a class="btn btn-sm touch:min-h-11" href="/system/settings">{{icon "sliders-horizontal"}}Open Settings</a>
+    </div>
+    {{end}}
+    {{/* A backlog that is missing reads as an empty queue, with no error: nothing is dispatched, and
+         this is the only place that says why. */}}
+    {{with $p.BacklogProblem}}
+    <div role="alert" class="alert alert-vertical items-start border-error/60 bg-error/10 sm:alert-horizontal">
+      {{iconc "octagon-alert" "size-6 text-error"}}
+      <div class="flex min-w-0 flex-col gap-1 text-start text-base-content">
+        <h2 class="font-display text-lg font-semibold">The backlog of the main checkout is {{.}}</h2>
+        <p class="break-words text-sm">The queue reads as empty, and the dispatcher starts nothing, until <code class="font-mono">{{$p.BacklogPath}}</code> is back.</p>
+      </div>
+      <a class="btn btn-sm touch:min-h-11" href="/backlog">{{icon "list-ordered"}}Open Backlog</a>
+    </div>
+    {{end}}
+    {{/* What a daemon was started with is in no file: Settings shows what the files say, so it is
+         said here, where a person looks first. */}}
+    {{with $p.DaemonGiven}}
+    <div role="status" class="alert alert-vertical items-start border-warning/60 bg-warning/10 sm:alert-horizontal">
+      {{iconc "sliders-horizontal" "size-6 text-warning"}}
+      <div class="flex min-w-0 flex-col gap-1 text-start text-base-content">
+        <h2 class="font-display text-lg font-semibold">The daemon runs with {{count (len .) "value" "values"}} it was given when it started</h2>
+        <p class="break-words text-sm">{{range $i, $v := .}}{{if $i}} {{end}}<code class="break-all font-mono">--set {{$v}}</code>{{end}}</p>
+        <p class="text-sm text-base-content/70">No file holds {{if eq (len .) 1}}it{{else}}them{{end}}: Settings shows what the files say, and the daemon reads {{if eq (len .) 1}}this value{{else}}these values{{end}} until it stops.</p>
+      </div>
+      <a class="btn btn-sm touch:min-h-11" href="/system/processes">{{icon "cpu"}}Open Processes</a>
+    </div>
+    {{end}}
+  </div>
+
+  {{/* What waits for a person: one line, and the way to it. */}}
+  <div id="dashboard-waiting" data-live-region>
+    {{if $w.Total}}
+    <div role="status" class="alert alert-vertical items-start sm:alert-horizontal {{if $w.Urgent}} border-error/60 bg-error/10 {{else}} border-warning/60 bg-warning/10 {{end}}">
+      {{if $w.Urgent}}{{iconc "hand" "size-6 text-error"}}{{else}}{{iconc "hand" "size-6 text-warning"}}{{end}}
+      <div class="flex min-w-0 flex-col gap-1 text-start text-base-content">
+        <h2 class="font-display text-lg font-semibold">{{if eq $w.Total 1}}1 thing waits for you{{else}}{{$w.Total}} things wait for you{{end}}</h2>
+        <p class="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+          {{if $w.Paused}}<span>the kit is paused</span>{{end}}
+          {{if $w.Blocked}}<span>{{count $w.Blocked "blocked change" "blocked changes"}}</span>{{end}}
+          {{if $w.Questions}}<span>{{count $w.Questions "question from an agent" "questions from agents"}}</span>{{end}}
+          {{if $w.BrokenBases}}<span>{{count $w.BrokenBases "base branch that fails on its own" "base branches that fail on their own"}}</span>{{end}}
+          {{if $w.LostRuns}}<span>{{count $w.LostRuns "worker that is gone" "workers that are gone"}}</span>{{end}}
+          {{if $w.Proposals}}<span>{{count $w.Proposals "proposal to decide" "proposals to decide"}}</span>{{end}}
+        </p>
+      </div>
+      <a class="btn btn-sm btn-primary touch:min-h-11" href="/inbox">{{icon "hand"}}Open Needs you</a>
+    </div>
+    {{end}}
+  </div>
+
+  <section id="dashboard-rail" data-live-region aria-labelledby="rail-title">
+    <h2 id="rail-title" class="sr-only">Changes by state</h2>
+    <ol class="grid grid-cols-2 gap-1 sm:grid-cols-5 sm:gap-0">
+      {{range $p.Rail}}{{template "dashboard_stage" .}}{{end}}
+    </ol>
+    {{if or $p.Aside $p.QueuedUnlisted}}
+    <p class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <span class="text-xs font-medium uppercase tracking-[0.16em] text-base-content/60">Outside the pipeline</span>
+      {{range $p.Aside}}<a href="/changes?state={{.State}}" class="{{if eq .State "blocked"}} badge badge-error {{else if eq .State "rebuild_requested"}} badge badge-warning {{else}} badge badge-ghost {{end}} gap-1 tabular-nums touch:min-h-11">{{iconc .Icon "size-3"}}{{.Count}} {{.Label}}</a>{{end}}
+      {{/* What a cycle queued is on record before the main checkout lists it: it is no change that
+           was lost, and it is counted apart from the ones that are not in the backlog. */}}
+      {{with $p.QueuedUnlisted}}<a href="{{$p.UnlistedHref}}" class="badge badge-ghost gap-1 tabular-nums touch:min-h-11" title="A cycle queues in its own copy, and the main checkout lists what it queued when the cycle ends. During a visual QA session nothing moves that checkout, and it lists the change once the session has ended: on the next pass of the dispatcher, at the next cycle, or with a sync of the repositories. A change a person takes out of the backlog afterwards is counted with the ones that are not in the backlog.">{{iconc "orbit" "size-3"}}{{len .}} queued by a cycle, not in the main checkout</a>{{end}}
+    </p>
+    {{end}}
+  </section>
+
+  <div class="grid items-start gap-6 xl:grid-cols-12">
+    <section id="dashboard-running" data-live-region class="card card-border min-w-0 bg-base-100 xl:col-span-7" aria-labelledby="running-title">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-base-content/10 px-4 py-3">
+        <h2 id="running-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "activity" "size-4 text-primary"}}Running now</h2>
+        <a href="/executions?status=running" class="link link-hover text-sm text-base-content/70 touch:inline-flex touch:min-h-11 touch:items-center">Executions that run</a>
+      </div>
+      {{if $p.Busy}}
+      <ul class="list">
+        {{range $p.Open}}
+        <li class="list-row items-start gap-3 text-sm">
+          {{if .Lost}}<span class="status status-error mt-1.5" aria-hidden="true"></span>
+          {{else if .Idle}}<span class="status status-warning mt-1.5" aria-hidden="true"></span>
+          {{else}}<span class="mt-1.5 inline-grid *:[grid-area:1/1]" aria-hidden="true"><span class="status status-info animate-ping"></span><span class="status status-info"></span></span>{{end}}
+          <div class="flex min-w-0 flex-col gap-1">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {{template "change_link" .ChangeName}}
+              {{if .Lost}}{{badge "worker gone" "error"}}{{end}}
+              <span class="text-xs text-base-content/60">worker run #{{.ID}}, {{(word "change_runs.origin" .Origin).Text}} · slot {{.Slot}} · running for <span class="tabular-nums">{{took .StartedAt "" $.ReadAt}}</span></span>
+            </div>
+            {{if .Execution}}
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/80">
+              <a class="link link-hover font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .Execution.ExecID}}">{{.Name}}</a>
+              {{with .EnginesTried}}<span class="flex flex-wrap items-center gap-1.5">{{template "engines_tried" .}}</span>{{end}}
+              <span class="text-base-content/60">for <span class="tabular-nums">{{took .Execution.StartedAt "" $.ReadAt}}</span></span>
+            </div>
+            {{else if not .Lost}}<p class="text-xs text-base-content/60">Between two prompts: the worker runs the gates or waits for the evaluator.</p>{{end}}
+            {{template "idle_now" .Idle}}
+            {{if .Lost}}<p class="text-xs text-warning">Nothing holds the lease of the change: open it to give the lease back.</p>{{end}}
+          </div>
+        </li>
+        {{end}}
+        {{with $p.Merge}}
+        <li class="list-row items-start gap-3 text-sm">
+          <span class="mt-1.5 inline-grid *:[grid-area:1/1]" aria-hidden="true"><span class="status status-info animate-ping"></span><span class="status status-info"></span></span>
+          <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            {{template "change_link" .ChangeName}}
+            <span class="text-xs text-base-content/60">the merger is {{(word "merge_attempts.state" .State).Text}} · for <span class="tabular-nums">{{took .StartedAt "" $.ReadAt}}</span></span>
+          </div>
+        </li>
+        {{end}}
+        {{with $p.Cycle}}
+        <li class="list-row items-start gap-3 text-sm">
+          {{if and $p.CycleRun $p.CycleRun.Idle}}<span class="status status-warning mt-1.5" aria-hidden="true"></span>
+          {{else}}<span class="mt-1.5 inline-grid *:[grid-area:1/1]" aria-hidden="true"><span class="status status-info animate-ping"></span><span class="status status-info"></span></span>{{end}}
+          <div class="flex min-w-0 flex-col gap-1">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <a class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/cycles/{{enc .Stamp}}">cycle {{.Stamp}}</a>
+              <span class="text-xs text-base-content/60">{{with .Trigger}}{{(word "cycles.trigger" .).Text}} · {{end}}running for <span class="tabular-nums">{{took .StartedAt "" $.ReadAt}}</span></span>
+            </div>
+            {{with $p.CycleRun}}
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/80">
+              <a class="link link-hover font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .ExecID}}">its judgment</a>
+              {{with .EnginesTried}}<span class="flex flex-wrap items-center gap-1.5">{{template "engines_tried" .}}</span>{{end}}
+            </div>
+            {{template "idle_now" .Idle}}
+            {{end}}
+          </div>
+        </li>
+        {{end}}
+        {{range $p.Others}}{{template "exec_line" (dict "row" . "at" $.ReadAt)}}{{end}}
+      </ul>
+      {{else}}{{template "empty" (dict "icon" "circle-pause" "title" "Nothing runs now." "text" "No worker, no merge, no cycle and no agent started by a person is in progress.")}}{{end}}
+    </section>
+
+    <section id="dashboard-cycle" data-live-region class="card card-border min-w-0 bg-base-100 xl:col-span-5" aria-labelledby="cycle-title">
+      <div class="border-b border-base-content/10 px-4 py-3">
+        <h2 id="cycle-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "orbit" "size-4 text-primary"}}The cycle</h2>
+      </div>
+      <div class="flex flex-col gap-3 p-4 text-sm">
+        {{with $p.NextCycle}}
+        <div>
+          <h3 class="text-xs font-medium uppercase tracking-wider text-base-content/60">Next cycle</h3>
+          <p class="mt-1">At the latest {{at .Latest}}: the daemon runs one every <span class="tabular-nums">{{seconds .IntervalSeconds}}</span>.</p>
+          {{if .IdleDelaySeconds}}
+          <p class="mt-1 text-base-content/80">{{if and .Earliest (not .EarliestPassed)}}It may start earlier, {{at .Earliest}} at the soonest, once a worker is free with nothing to start.{{else}}It may start earlier, as soon as a worker is free with nothing to start.{{end}}{{with .Waits}} Now it waits because {{(word "cycle_schedule.waits" .).Text}}.{{end}}</p>
+          {{else}}<p class="mt-1 text-base-content/80">It starts on its interval only: <a class="link inline-flex min-h-6 items-center touch:min-h-11" href="{{settingHref idleDelayKey}}">{{idleDelayName}}</a> is off.</p>{{end}}
+        </div>
+        {{else}}
+        <div>
+          <h3 class="text-xs font-medium uppercase tracking-wider text-base-content/60">Next cycle</h3>
+          <p class="mt-1">No daemon says when: a cycle runs when a person starts one.</p>
+        </div>
+        {{end}}
+        <div>
+          <h3 class="text-xs font-medium uppercase tracking-wider text-base-content/60">Last cycle</h3>
+          {{with $p.LastCycle}}
+          <p class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <a class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/cycles/{{enc .Stamp}}">{{.Stamp}}</a>
+            <span>{{label .Outcome}}{{with .Strategy}}, on {{label .}}{{end}}</span>
+          </p>
+          <p class="mt-1 text-xs text-base-content/60">ended {{at .FinishedAt}} · took <span class="tabular-nums">{{took .StartedAt .FinishedAt $.ReadAt}}</span> · {{count .FindingsCount "finding" "findings"}}{{with .Trigger}} · {{(word "cycles.trigger" .).Text}}{{end}}</p>
+          {{else}}<p class="mt-1 text-base-content/60">No cycle has ended yet.</p>{{end}}
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section id="dashboard-recent" data-live-region class="card card-border min-w-0 bg-base-100" aria-labelledby="recent-title">
+    <div class="border-b border-base-content/10 px-4 py-3">
+      <h2 id="recent-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "history" "size-4 text-primary"}}What it closed last</h2>
+    </div>
+    {{if $p.Recent}}
+    <ul class="list">
+      {{range $p.Recent}}{{template "outcome_line" (dict "o" . "at" $.ReadAt)}}{{end}}
+    </ul>
+    {{else}}{{template "empty" (dict "icon" "history" "title" "Nothing has closed yet." "text" "A change that is built, blocked or merged, and a cycle that ends, appear here.")}}{{end}}
+  </section>
+</div>
+{{end}}

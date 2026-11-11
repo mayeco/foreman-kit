@@ -1,0 +1,198 @@
+{{/* System → Settings: the configuration of the application, and what the kit would change of it.
+     The pages draw .Page, the structs their reads return (internal/portal/page_system.go). Every
+     file, key and value comes from the catalog of settings of the kit: no key and no file is
+     written here. */}}
+
+{{/* The two parts of Settings. Takes the one shown: "settings" or "recommendations". */}}
+{{define "settings_tabs"}}
+<div role="tablist" class="tabs tabs-lift mb-0 max-w-full" aria-label="The settings and what the kit would change of them">
+  <a role="tab" href="/system/settings" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if eq . "settings"}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if eq . "settings"}} aria-selected="true"{{end}}>{{icon "sliders-horizontal"}}Settings</a>
+  <a role="tab" href="/system/recommendations" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if eq . "recommendations"}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if eq . "recommendations"}} aria-selected="true"{{end}}>{{icon "lightbulb"}}Recommendations</a>
+</div>
+{{end}}
+
+{{/* What a file holds for a setting, or what the kit ships for it. Takes "line" (the value on one
+     line), "lines" (the value as YAML, when it does not fit on one) and "what" (the words that name
+     it for whoever opens it). */}}
+{{define "setting_value"}}
+{{if .lines}}<details><summary class="link inline-flex min-h-6 cursor-pointer items-center text-xs touch:min-h-11">{{.what}}</summary><pre class="mt-1 max-h-72 overflow-auto rounded-box bg-base-200 p-2 font-mono text-xs" tabindex="0">{{.lines}}</pre></details>
+{{else}}<code class="break-all font-mono text-sm">{{.line}}</code>{{end}}
+{{end}}
+
+{{/* What the check of the configuration found in one thing it checks. Takes a Checked. */}}
+{{define "checked_problems"}}
+{{range .Errors}}<li class="flex items-start gap-2">{{iconc "octagon-alert" "mt-0.5 size-4 shrink-0 text-error"}}<span class="min-w-0 break-words"><span class="sr-only">Error: </span>{{.}}</span></li>{{end}}
+{{range .Warnings}}<li class="flex items-start gap-2">{{iconc "triangle-alert" "mt-0.5 size-4 shrink-0 text-warning"}}<span class="min-w-0 break-words"><span class="sr-only">Warning: </span>{{.}}</span></li>{{end}}
+{{end}}
+
+{{define "settings"}}{{$p := .Page}}
+{{template "system_nav" .}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Settings</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">Every setting of this application, as its file holds it. A change is written to its file and counts from the next run of what reads it. Commit it before the next cycle: a file changed outside what a cycle may write pauses the kit.</p>
+  <p class="mt-2 flex max-w-3xl items-start gap-2 text-sm {{if $p.Errors}}text-error{{else if $p.Warnings}}text-warning{{else}}text-base-content/80{{end}}">{{if $p.Errors}}{{iconc "octagon-alert" "mt-0.5 size-4 shrink-0"}}{{else if $p.Warnings}}{{iconc "triangle-alert" "mt-0.5 size-4 shrink-0"}}{{else}}{{iconc "circle-check" "mt-0.5 size-4 shrink-0 text-success"}}{{end}}<span class="min-w-0 break-words">The check of the configuration found {{if or $p.Errors $p.Warnings}}{{count $p.Errors "error" "errors"}} and {{count $p.Warnings "warning" "warnings"}}, in {{range $i, $f := $p.Found}}{{if $i}}, {{end}}<a class="link inline-flex min-h-6 items-center font-mono touch:min-h-11" href="{{$f.Href}}">{{$f.Name}}</a>{{end}}{{else}}nothing wrong{{end}}.</span></p>
+</header>
+
+{{if $p.Waits}}
+<section role="alert" class="alert alert-soft alert-error mb-5 items-start text-base-content" aria-labelledby="settings-waits-title">{{iconc "octagon-alert" "size-4 shrink-0 text-error"}}
+  <div class="min-w-0">
+    <h2 id="settings-waits-title" class="text-sm font-semibold">{{count (len $p.Waits) "process starts" "processes start"}} nothing new until the configuration is mended</h2>
+    <ul class="mt-1 flex flex-col gap-1 text-sm">
+      {{range $p.Waits}}<li class="break-words"><span class="font-medium">{{.Process}}:</span> {{.Why}}</li>{{end}}
+    </ul>
+  </div>
+</section>
+{{end}}
+
+{{with $p.Editing}}{{$e := .}}
+<section id="edit" class="card card-border mb-5 min-w-0 border-primary/50 bg-base-100" aria-labelledby="edit-title">
+  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-base-content/10 px-4 py-3">
+    <h2 id="edit-title" class="flex min-w-0 flex-wrap items-center gap-x-2 font-display text-base font-semibold">{{iconc "pencil" "size-4 shrink-0 text-primary"}}<span>Change</span><code class="break-all font-mono">{{.Option}}</code><span class="font-sans text-sm font-normal text-base-content/70">in <code class="font-mono">{{.File}}</code></span></h2>
+    <a class="btn btn-ghost btn-sm touch:min-h-11" href="/system/settings?file={{enc $p.File.Name}}">{{icon "x"}}Close</a>
+  </div>
+  <div class="grid gap-x-6 gap-y-4 p-4 lg:grid-cols-2">
+    <dl class="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+      <dt class="text-base-content/70">It decides</dt><dd class="break-words">{{.Means}}</dd>
+      <dt class="text-base-content/70">Read by</dt><dd class="break-words">{{.ReadBy}}</dd>
+      <dt class="text-base-content/70">It accepts</dt><dd class="break-words">{{.Accepts}}</dd>
+      <dt class="text-base-content/70">Its file holds</dt>
+      <dd class="min-w-0">{{if .Set}}{{template "setting_value" (dict "line" .Written "lines" .Lines "what" "Show what the file holds")}}{{else}}<span class="text-error">nothing: the key is missing</span>{{end}}{{if and .Set .Problem}}<p class="mt-1 break-words text-xs text-error">{{.Problem}}</p>{{end}}</dd>
+      <dt class="text-base-content/70">The kit ships</dt>
+      <dd class="min-w-0">{{if .AsShipped}}<span class="text-base-content/70">the same</span>{{else if or .Shipped .ShippedLines}}{{template "setting_value" (dict "line" .Shipped "lines" .ShippedLines "what" "Show what the kit ships")}}{{else}}<span class="text-base-content/70">no value: it is this application's own</span>{{end}}</dd>
+      {{with .OverriddenBy}}<dt class="text-warning">Overridden</dt><dd class="break-words text-warning"><code class="break-all font-mono">{{.}}</code> was given to the process of this portal when it started. It replaces what the file holds for what that process runs, until it stops{{with $e.InEffect}}: it reads <code class="font-mono">{{.}}</code>{{end}}.</dd>{{end}}
+    </dl>
+    <div class="min-w-0">
+      {{if .Settable}}
+      <form data-api="/api/system/settings" data-title="What the kit said of the change" class="flex flex-col gap-3">
+        <input type="hidden" name="key" value="{{.Key}}">
+        <fieldset class="fieldset">
+          <label class="label" for="setting-value">The value its file is to hold</label>
+          {{if .Values}}<select id="setting-value" name="value" class="select select-sm w-full font-mono touch:min-h-11">{{range .Values}}<option value="{{.}}"{{if eq . $e.Written}} selected{{end}}>{{.}}</option>{{end}}</select>
+          {{else if eq (print .Kind) "bool"}}<select id="setting-value" name="value" class="select select-sm w-full font-mono touch:min-h-11"><option value="true"{{if eq .Written "true"}} selected{{end}}>true</option><option value="false"{{if eq .Written "false"}} selected{{end}}>false</option></select>
+          {{else}}<input id="setting-value" name="value" value="{{.Typed}}" class="input input-sm w-full font-mono touch:min-h-11" autocomplete="off" spellcheck="false">{{end}}
+        </fieldset>
+        <div class="flex flex-wrap gap-2">
+          <button type="submit" class="btn btn-sm btn-primary touch:min-h-11">{{icon "check"}}Write it to the file</button>
+          <button type="submit" name="dry_run" value="1" class="btn btn-sm touch:min-h-11">{{icon "flask-conical"}}Only check it</button>
+        </div>
+        <p class="text-xs text-base-content/60">The kit checks the value against what the setting accepts and rewrites only the line of its key: the comments of the file and every other line stay.</p>
+      </form>
+      {{else}}
+      <p class="flex items-start gap-2 text-sm">{{iconc "info" "mt-0.5 size-4 shrink-0 text-info"}}<span class="min-w-0 break-words">The portal does not change this one: it holds more than one value. To change it: {{.Change}}.</span></p>
+      {{end}}
+    </div>
+  </div>
+</section>
+{{end}}
+
+{{if $p.Recommends}}{{template "settings_tabs" "settings"}}{{end}}
+<div class="{{if $p.Recommends}}rounded-b-box rounded-tr-box{{else}}rounded-box{{end}} border border-base-content/10 bg-base-100">
+  <div class="border-b border-base-content/10 p-3">
+    <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="Configuration file">
+      {{range $p.Tabs}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap gap-1.5 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}{{if .Errors}}<span class="badge badge-sm badge-error tabular-nums">{{.Errors}}<span class="sr-only"> {{if eq .Errors 1}}error{{else}}errors{{end}}</span></span>{{end}}{{if .Warnings}}<span class="badge badge-sm badge-warning tabular-nums">{{.Warnings}}<span class="sr-only"> {{if eq .Warnings 1}}warning{{else}}warnings{{end}}</span></span>{{end}}</a>{{end}}
+    </div>
+  </div>
+  {{with $p.File}}
+  <div class="border-b border-base-content/10 px-4 py-3 text-sm">
+    <p class="break-words"><code class="font-mono font-medium">{{.Path}}</code>: {{.About}}. Read by {{.ReadBy}}.</p>
+    {{if or .Errors .Warnings}}<ul class="mt-2 flex flex-col gap-1">{{template "checked_problems" .Checked}}</ul>{{end}}
+  </div>
+  {{end}}
+  {{if $p.Settings}}
+  <div class="max-w-full overflow-x-auto">
+    <table class="table table-stack">
+      <thead><tr><th>Setting</th><th>Its file holds</th><th>The kit ships</th><th><span class="sr-only">Change it</span></th></tr></thead>
+      <tbody>
+        {{range $p.Settings}}
+        <tr class="align-top hover:bg-base-200/60{{if and $p.Editing (eq $p.Editing.Key .Key)}} bg-base-200/60{{end}}">
+          <td class="min-w-56 max-w-md">
+            <code class="break-all font-mono text-sm font-medium">{{.Option}}</code>
+            <p class="mt-1 break-words text-xs text-base-content/70">{{.Means}}</p>
+          </td>
+          <td class="min-w-40 max-w-xs">
+            {{if .Set}}{{template "setting_value" (dict "line" .Written "lines" .Lines "what" (printf "Show what %s holds" .Option))}}{{else}}<span class="badge badge-sm badge-soft badge-error">{{iconc "octagon-alert" "size-3"}}missing</span>{{end}}
+            {{if and .Set .Problem}}<p class="mt-1 break-words text-xs text-error">{{.Problem}}</p>{{end}}
+            {{with .OverriddenBy}}<p class="mt-1 break-words text-xs text-warning"><code class="break-all font-mono">{{.}}</code> replaces it for what the process of this portal runs, until it stops.</p>{{end}}
+          </td>
+          <td class="min-w-32 max-w-56">
+            {{if .AsShipped}}<span class="text-sm text-base-content/60">the same</span>
+            {{else if or .Shipped .ShippedLines}}{{template "setting_value" (dict "line" .Shipped "lines" .ShippedLines "what" (printf "Show what the kit ships for %s" .Option))}}
+            {{else}}<span class="text-sm text-base-content/60">no value of its own</span>{{end}}
+          </td>
+          <td class="text-right"><a class="btn btn-xs text-xs touch:min-h-11" href="{{settingHref .Key}}">{{icon "pencil"}}Change<span class="sr-only"> {{.Option}}</span></a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}{{template "empty" (dict "icon" "sliders-horizontal" "title" "The catalog of the kit has no setting of this file." "text" "What the file holds is content the kit reads whole: its page of the documentation says how it is written.")}}{{end}}
+</div>
+
+{{if $p.Others}}
+<section id="settings-others" class="card card-border mt-6 min-w-0 scroll-mt-20 bg-base-100" aria-labelledby="settings-others-title">
+  <div class="border-b border-base-content/10 px-4 py-3"><h2 id="settings-others-title" class="flex items-center gap-2 font-display text-base font-semibold">{{iconc "shield-check" "size-4 text-primary"}}What else the check of the configuration looks at</h2></div>
+  <ul class="list">
+    {{range $p.Others}}
+    <li class="list-row items-start gap-3 py-2.5">
+      {{if .Errors}}{{iconc "octagon-alert" "mt-0.5 size-4 shrink-0 text-error"}}{{else if .Warnings}}{{iconc "triangle-alert" "mt-0.5 size-4 shrink-0 text-warning"}}{{else}}{{iconc "circle-check" "mt-0.5 size-4 shrink-0 text-success"}}{{end}}
+      <div class="min-w-0 text-sm">
+        <p class="break-words">{{if eq .Name "application"}}The application as a whole{{else}}<code class="break-all font-mono">{{.Name}}</code>{{end}}<span class="text-base-content/70">: {{if .Errors}}{{count (len .Errors) "error" "errors"}}{{if .Warnings}} and {{count (len .Warnings) "warning" "warnings"}}{{end}}{{else if .Warnings}}{{count (len .Warnings) "warning" "warnings"}}{{else}}nothing wrong{{end}}</span></p>
+        {{if or .Errors .Warnings}}<ul class="mt-1 flex flex-col gap-1">{{template "checked_problems" .}}</ul>{{end}}
+      </div>
+    </li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
+{{end}}
+
+{{define "recommendations"}}{{$p := .Page}}
+{{template "system_nav" .}}
+<header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+  <div class="min-w-0 flex-1 basis-80">
+    <h1 class="font-display text-2xl font-bold sm:text-3xl">Recommendations</h1>
+    <p class="mt-1 max-w-3xl text-sm text-base-content/70">Which settings the records of the kit argue for changing, from what it recorded between {{at $p.From}} and {{at $p.To}}. Nothing is changed for you: apply what you agree with, one setting at a time, then commit it.</p>
+  </div>
+  {{if $p.Stretches}}
+  <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="Stretch of the records">
+    {{range $p.Stretches}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}</a>{{end}}
+  </div>
+  {{end}}
+</header>
+
+{{template "settings_tabs" "recommendations"}}
+<div class="rounded-b-box rounded-tr-box border border-base-content/10 bg-base-100">
+  {{if $p.Short}}<p class="flex items-start gap-2 border-b border-base-content/10 px-4 py-3 text-sm text-base-content/80">{{iconc "info" "mt-0.5 size-4 shrink-0 text-info"}}<span>The records do not go back that far: this is what there is of that stretch.</span></p>{{end}}
+  {{if not $p.Ready}}{{template "empty" (dict "icon" "lightbulb" "title" "Nothing yet." "text" (printf "A dispatcher has run for %.1f of the %.0f hours the kit asks for before it recommends anything." $p.HistoryHours $p.MinimumHours))}}
+  {{else if not $p.Rows}}{{template "empty" (dict "icon" "lightbulb" "title" "Nothing to change." "text" "Nothing on record in this stretch argues for another value of a setting.")}}
+  {{else}}
+  <div class="max-w-full overflow-x-auto">
+    <table class="table table-stack">
+      <thead><tr><th>Setting</th><th>Now</th><th>Recommended</th><th>Why</th><th>What it would have gained</th><th><span class="sr-only">Change it</span></th></tr></thead>
+      <tbody>
+        {{range $p.Rows}}
+        <tr class="align-top hover:bg-base-200/60">
+          <td class="min-w-48"><code class="whitespace-nowrap font-mono text-sm font-medium max-xl:whitespace-normal max-xl:break-all">{{.Option}}</code><p class="mt-1 break-all font-mono text-xs text-base-content/70">{{.File}}</p></td>
+          <td class="whitespace-nowrap font-mono text-sm">{{.Current}}</td>
+          <td class="whitespace-nowrap font-mono text-sm font-semibold text-primary">{{.Recommended}}</td>
+          <td class="min-w-48 max-w-sm break-words text-sm">{{.Why}}</td>
+          <td class="min-w-40 max-w-xs break-words text-sm">{{.Improvement}}</td>
+          <td class="text-right"><a class="btn btn-xs text-xs touch:min-h-11" href="{{settingHref .Key}}">{{icon "pencil"}}Change<span class="sr-only"> {{.Option}}</span></a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+  {{if $p.Measures}}
+  <details class="collapse collapse-plus rounded-none border-t border-base-content/10">
+    <summary class="collapse-title font-display font-semibold touch:min-h-11"><span class="flex items-center gap-2">{{iconc "ruler" "size-4 text-primary"}}What the kit saw for each setting it evaluates</span></summary>
+    <div class="collapse-content">
+      <dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm md:grid-cols-[auto_minmax(0,1fr)]">
+        {{range $p.Measures}}<dt><a class="link link-hover inline-flex min-h-6 items-center break-all font-mono touch:min-h-11" href="{{settingHref .Key}}">{{.Option}}</a></dt><dd class="break-words text-base-content/80">{{.Seen}}</dd>{{end}}
+      </dl>
+    </div>
+  </details>
+  {{end}}
+</div>
+{{end}}

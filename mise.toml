@@ -1,0 +1,127 @@
+[tools]
+go = "1.27.4"
+
+[env]
+# Static binary invariant: never link Cgo (see AGENTS.md §3).
+CGO_ENABLED = "0"
+
+[vars]
+bin = "bin/foreman-kit"
+sim_root = "/tmp/openspec-sim-stack"
+
+# --- Go ----------------------------------------------------------------------
+
+[tasks.fmt]
+description = "Format Go sources with gofmt"
+run = "gofmt -w cmd internal"
+
+[tasks."fmt:check"]
+description = "Fail if any Go source is not gofmt-formatted"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+out="$(gofmt -l cmd internal)"
+if [ -n "$out" ]; then
+  echo "Files need gofmt:" >&2
+  echo "$out" >&2
+  exit 1
+fi
+'''
+
+[tasks.vet]
+description = "Run go vet static analysis"
+run = "go vet ./..."
+
+[tasks.build]
+description = "Build the static foreman-kit binary into bin/"
+run = "go build -o {{vars.bin}} ./cmd/foreman-kit"
+sources = ["go.mod", "go.sum", "cmd/**/*.go", "internal/**/*"]
+outputs = ["bin/foreman-kit"]
+
+[tasks.test]
+description = "Run unit and integration tests"
+usage = 'arg "[pkg]" help="Package pattern to test" default="./internal/..."'
+run = "go test -count=1 {{usage.pkg}}"
+
+[tasks."test:all"]
+description = "Run every test in the module, including cmd/"
+run = "go test -count=1 ./..."
+
+[tasks.evaluator-contract]
+description = "Run the offline contract check of the evaluator"
+depends = ["build"]
+run = "./{{vars.bin}} evaluator-contract"
+
+[tasks.sim]
+description = "Run the end-to-end simulation stack (all scenarios by default)"
+depends = ["build"]
+usage = 'arg "[scenario]" help="Scenario name to run" default="all"'
+run = "./{{vars.bin}} sim run {{vars.sim_root}} {{usage.scenario}}"
+
+[tasks."sim:faults"]
+description = "Run the fault-injection scenarios (LLM and evaluator outages, agent crashes, git, disk, backlog edge cases)"
+depends = ["build"]
+usage = 'arg "[scenario]" help="Fault scenario name to run" default="faults"'
+run = "./{{vars.bin}} sim run {{vars.sim_root}}-faults {{usage.scenario}}"
+
+[tasks.check]
+description = "Full pre-finish verification: vet, build, tests, evaluator contract"
+depends = ["vet", "test", "evaluator-contract"]
+
+[tasks."check:full"]
+description = "check plus the end-to-end simulation (orchestrator/store/cycle/proc/evaluator changes)"
+depends = ["check"]
+run = "mise run sim"
+
+[tasks.install]
+description = "Install the binary into ~/.local/bin"
+run = "go build -o ~/.local/bin/foreman-kit ./cmd/foreman-kit"
+
+[tasks."build:all"]
+description = "Build the static binary for macOS and Linux, amd64 and arm64, into dist/bin/"
+run = "scripts/build.sh --all"
+
+[tasks."npm:pack"]
+description = "Pack the npm package (private) of this platform into dist/"
+run = "scripts/npm-pack.sh"
+
+[tasks."npm:install"]
+description = "Build, pack and install foreman-kit globally with npm (NPM=<path> chooses the npm)"
+run = "scripts/npm-install.sh"
+
+[tasks."release:check"]
+description = "Validate .goreleaser.yaml"
+run = "goreleaser check"
+
+[tasks."release:snapshot"]
+description = "Build a release locally with GoReleaser into dist/release/; nothing is published"
+run = "goreleaser release --snapshot --clean"
+
+[tasks.tidy]
+description = "Tidy go.mod and go.sum"
+run = "go mod tidy"
+
+[tasks.clean]
+description = "Remove the built binary and simulation scratch directory"
+run = "rm -rf {{vars.bin}} {{vars.sim_root}}"
+
+# --- Portal UI (Node, outputs committed under internal/assets/portal_ui/) ----
+
+[tasks."portal:deps"]
+description = "Install portal build dependencies"
+dir = "web/portal"
+run = "npm ci"
+sources = ["package.json", "package-lock.json"]
+outputs = ["node_modules/.package-lock.json"]
+
+[tasks."portal:build"]
+description = "Rebuild the portal stylesheet, icon sprite and fonts"
+dir = "web/portal"
+depends = ["portal:deps"]
+run = "npm run build"
+
+[tasks."portal:watch"]
+description = "Rebuild portal assets on change"
+dir = "web/portal"
+depends = ["portal:deps"]
+run = "npm run watch"

@@ -1,0 +1,98 @@
+{{/* Events: what the orchestrator recorded, as it recorded it. The two pages draw .Page, the structs
+     their reads return (internal/portal/page_events.go). */}}
+
+{{/* Where the list of events ends: the way to the latest and to the older ones. dict: older, newest */}}
+{{define "older_newest"}}{{if or .older .newest}}
+<nav class="flex flex-wrap items-center justify-between gap-3 border-t border-base-content/10 px-4 py-3 text-sm" aria-label="Pages">
+  {{if .newest}}<a class="btn btn-sm touch:min-h-11" href="{{.newest}}">{{icon "chevrons-left"}}Latest</a>{{else}}<span></span>{{end}}
+  {{if .older}}<a class="btn btn-sm touch:min-h-11" href="{{.older}}">Older{{icon "chevron-right"}}</a>{{else}}<span class="text-xs text-base-content/60">These are the oldest.</span>{{end}}
+</nav>
+{{end}}{{end}}
+
+{{define "events"}}{{$p := .Page}}{{$f := $p.Filter}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Events</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">What the orchestrator recorded, as it recorded it, the latest first. The page of a change and the page of an execution tell the same from their rows.</p>
+</header>
+
+<div class="mb-4 flex flex-col gap-3">
+  <form method="get" action="/events" class="flex flex-wrap items-center gap-2">
+    {{with $f.Change}}<input type="hidden" name="change" value="{{.}}">{{end}}
+    {{with $f.ExecID}}<input type="hidden" name="exec_id" value="{{.}}">{{end}}
+    {{with $f.ChangeRunID}}<input type="hidden" name="change_run_id" value="{{.}}">{{end}}
+    {{with $f.MergeAttemptID}}<input type="hidden" name="merge_attempt_id" value="{{.}}">{{end}}
+    {{with $f.GateRoundID}}<input type="hidden" name="gate_round_id" value="{{.}}">{{end}}
+    {{with $f.CycleStamp}}<input type="hidden" name="cycle_stamp" value="{{.}}">{{end}}
+    <label class="sr-only" for="events-type">Type of event</label>
+    <select id="events-type" name="event" class="select select-sm w-72 max-w-full touch:min-h-11" data-autosubmit>
+      <option value="">Every type ({{$p.Total}})</option>
+      {{range $p.Types}}<option value="{{.Event}}"{{if eq .Event $f.Event}} selected{{end}}>{{.Event}} ({{.Count}})</option>{{end}}
+    </select>
+    <noscript><button type="submit" class="btn btn-sm touch:min-h-11">Filter</button></noscript>
+  </form>
+  {{if $p.Narrowed}}
+  <ul class="flex flex-wrap items-center gap-2 text-sm" aria-label="What the list is narrowed to">
+    {{range $p.Narrowed}}
+    <li class="flex items-center gap-2 rounded-field border border-base-content/15 bg-base-100 py-0.5 pl-3 pr-1">
+      <span class="text-base-content/70">{{.Label}}</span>
+      {{if .Href}}<a class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{.Href}}">{{.Value}}</a>{{else}}<span class="font-mono font-medium">{{.Value}}</span>{{end}}
+      <a href="{{.Without}}" class="btn btn-xs btn-square btn-ghost touch:min-h-11 touch:min-w-11" aria-label="Stop narrowing by {{.Label}}">{{icon "x"}}</a>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+</div>
+
+<div class="card card-border min-w-0 bg-base-100">
+  {{if $p.Items}}
+  <ul class="list px-4">
+    {{range $p.Items}}{{template "event_line" (dict "e" . "exec" true "change" true)}}{{end}}
+  </ul>
+  {{else if or $f.Event $p.Narrowed}}{{template "empty" (dict "icon" "radio-tower" "title" "No event matches." "text" "Pick another type, or stop narrowing the list.")}}
+  {{else}}{{template "empty" (dict "icon" "radio-tower" "title" "No event has been recorded yet." "text" "The orchestrator records one for each thing it does: a worker that starts, a gate that fails, a merge.")}}{{end}}
+  {{template "older_newest" (dict "older" $p.Older "newest" $p.Newest)}}
+</div>
+{{end}}
+
+{{define "event"}}{{$p := .Page}}{{$t := evtone $p.Payload}}
+<header class="mb-5">
+  <p class="text-xs font-medium uppercase tracking-wider text-base-content/60">Event #{{$p.ID}}</p>
+  <h1 class="mt-1 flex items-center gap-2 break-all font-mono text-xl font-semibold sm:text-2xl {{if eq $t "error"}} text-error {{else if eq $t "warning"}} text-warning {{else if eq $t "success"}} text-success {{end}}">{{if eq $t "error"}}{{iconc "octagon-alert" "size-6 shrink-0"}}{{else if eq $t "warning"}}{{iconc "triangle-alert" "size-6 shrink-0"}}{{else if eq $t "success"}}{{iconc "circle-check" "size-6 shrink-0"}}{{end}}{{$p.Event}}</h1>
+  <p class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-base-content/70"><span>recorded {{at $p.TS}}</span>{{with $p.Engine}}<span>engine <span class="font-mono">{{.}}</span></span>{{end}}{{with $p.Phase}}<span>phase <span class="font-mono">{{.}}</span></span>{{end}}{{with $p.RepoPath}}<span>repository <span class="font-mono">{{.}}</span></span>{{end}}</p>
+</header>
+{{with evdesc $p.Payload}}<p class="mb-5 max-w-3xl">{{.}}</p>{{end}}
+
+<div class="grid items-start gap-6 lg:grid-cols-12">
+  <section class="card card-border min-w-0 bg-base-100 lg:col-span-8" aria-labelledby="event-carries">
+    <div class="border-b border-base-content/10 px-4 py-3"><h2 id="event-carries" class="font-display text-base font-semibold">What it carries</h2></div>
+    <div class="flex flex-col gap-4 p-4">
+      {{if $p.Fields}}
+      <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+        {{range $p.Fields}}<dt class="font-medium text-base-content/70">{{.Name}}</dt><dd class="min-w-0 whitespace-pre-wrap break-all font-mono text-xs sm:pt-0.5">{{.Value}}</dd>{{end}}
+      </dl>
+      {{else}}<p class="text-sm text-base-content/70">This event carries nothing besides its name and its time.</p>{{end}}
+      <details class="collapse collapse-arrow bg-base-200">
+        <summary class="collapse-title min-h-0 py-2 text-sm font-medium touch:py-3">Show the event as it was recorded</summary>
+        <div class="collapse-content"><pre class="max-h-96 overflow-auto whitespace-pre-wrap break-all font-mono text-xs" tabindex="0">{{$p.Raw}}</pre></div>
+      </details>
+    </div>
+  </section>
+
+  <div class="flex min-w-0 flex-col gap-6 lg:col-span-4">
+    {{if $p.Links}}
+    <section class="card card-border bg-base-100" aria-labelledby="event-about">
+      <div class="border-b border-base-content/10 px-4 py-3"><h2 id="event-about" class="font-display text-base font-semibold">What it is about</h2></div>
+      <ul class="flex flex-col p-4 text-sm sm:gap-2">
+        {{range $p.Links}}<li><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{.Href}}">{{.Label}}</a></li>{{end}}
+      </ul>
+    </section>
+    {{end}}
+    <section class="card card-border bg-base-100" aria-labelledby="event-lists">
+      <div class="border-b border-base-content/10 px-4 py-3"><h2 id="event-lists" class="font-display text-base font-semibold">Events like it</h2></div>
+      <ul class="flex flex-col p-4 text-sm sm:gap-2">
+        {{range $p.Lists}}<li><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{.Href}}">{{.Label}}</a></li>{{end}}
+      </ul>
+    </section>
+  </div>
+</div>
+{{end}}

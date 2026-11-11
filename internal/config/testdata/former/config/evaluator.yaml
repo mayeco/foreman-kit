@@ -1,0 +1,359 @@
+# ==============================================================================
+# config/evaluator.yaml - The evaluator: calibrated gates and their questions
+# ==============================================================================
+# The evaluator is the model that answers calibrated questions about a change. This
+# file says HOW it is called, WHAT each gate asks (questions, instructions, criteria)
+# and HOW openspec-kit acts on the answers (mode, assert thresholds, routing rules).
+# Today the only evaluator is Jev: its name appears in `model` and nowhere else.
+# Edit questions or thresholds directly here, then run `openspec-kit config check`.
+
+model: jev-1.14.0
+timeout: 30s
+max_retries: 2
+max_state_chars: 24000
+include_diffs: true
+abstain_band: [0.4, 0.6]
+on_unavailable: skip # skip | block
+
+# Known-answer health probe used by `openspec-kit check-engines` and `openspec-kit evaluator-contract`.
+canary:
+  state: |
+    ---- [gate] backend:lint: ruff check .
+    ---- [pass] backend:lint (2s)
+    ---- [gate] backend:test: pytest -q
+    318 passed in 41.2s
+    ---- [pass] backend:test (43s)
+    gates: PASS (2 executed; repos: backend)
+  assert:
+    - "all_gates_passed >= 0.8"
+    - "reports_failure <= 0.2"
+  questions:
+    all_gates_passed:
+      type: noul
+      instructions: Does this log report that every quality gate passed?
+      criteria:
+        "true": The log ends with an overall pass and no gate is marked FAIL.
+        "false": At least one gate failed, or the overall result is FAIL.
+    reports_failure:
+      type: noul
+      instructions: Does this log report a failing test or a failing gate?
+      criteria:
+        "true": A test or a gate is reported as failed.
+        "false": Every test and every gate is reported as passed.
+
+gates:
+  # Evaluated by `openspec-kit dispatch` after `openspec validate --strict` passes in PLAN.
+  plan_review:
+    mode: advisory # off | advisory | enforce
+    assert:
+      - "problem_is_concrete >= 0.6"
+      - "scenarios_are_testable >= 0.6"
+      - "tasks_cover_scenarios >= 0.6"
+      - "consistent_with_canonical_specs >= 0.6"
+      - "single_concern >= 0.6"
+    questions:
+      problem_is_concrete:
+        type: noul
+        instructions: Does the proposal state a specific problem and an outcome that can be checked?
+        criteria:
+          "true": The Why names a specific problem or need, and What Changes describes a result someone could verify.
+          "false": The motivation is generic (for example "improve quality" or "refactor things"), or no verifiable outcome is stated.
+      scenarios_are_testable:
+        type: noul
+        instructions: Can every scenario in delta_specs be checked by an automated test exactly as written?
+        criteria:
+          "true": Every WHEN names a concrete trigger and every THEN names an observable result such as a status code, a stored value, an emitted event or a rendered element.
+          "false": At least one scenario depends on vague words such as fast, secure, robust, user-friendly or correctly, or has no observable result.
+      tasks_cover_scenarios:
+        type: noul
+        instructions: Do the tasks include implementation work and test work for the requirements in delta_specs?
+        criteria:
+          "true": Each requirement in delta_specs has a task that implements it and a task that tests it.
+          "false": Some requirement in delta_specs has no implementing task or no testing task.
+      consistent_with_canonical_specs:
+        type: noul
+        instructions: Is the change consistent with the current behavior described in canonical_specs?
+        criteria:
+          "true": Nothing in the proposal or delta_specs contradicts canonical_specs, except requirements the delta explicitly lists under MODIFIED, REMOVED or RENAMED.
+          "false": The proposal or an ADDED requirement contradicts a current requirement without modifying or removing it.
+      single_concern:
+        type: noul
+        instructions: Does the change pursue a single goal that can be reviewed and shipped as one unit?
+        criteria:
+          "true": Every part of the proposal serves the same goal.
+          "false": The change bundles unrelated goals that should be separate changes.
+
+  # Evaluated by `openspec-kit dispatch` when quality gates fail during BUILD.
+  failure_triage:
+    mode: enforce
+    # After the gates were re-run once (rerun_when), a failure still caused by the environment holds the
+    # change (environment_hold, retried after blocked_retry_hours) instead of spending repair rounds on
+    # code that is not broken. Without a match, the BUILD agent repairs, as before.
+    actions:
+      - { question: cause, choice: environment_or_flaky, min_confidence: 0.8, action: hold_environment }
+    rerun_when:
+      question: cause
+      choice: environment_or_flaky
+      min_confidence: 0.8
+    escalate_when:
+      question: cause
+      choice: requirement_ambiguity
+      min_confidence: 0.8
+    questions:
+      cause:
+        type: choice
+        instructions: What is the most likely cause of the failure shown in gate_output?
+        criteria:
+          implementation_defect: The application code behaves differently from what a test, linter, type checker or build expects, for example an assertion with wrong values, an exception raised from application code, a type error or a lint error in changed code.
+          test_defect: A test is wrong or outdated, for example it calls code that no longer exists, asserts an old contract, or fails in its own setup.
+          environment_or_flaky: The failure comes from the environment rather than the code, for example connection refused or reset, DNS errors, timeouts, a port already in use, a missing tool or service, out of memory, or rate limiting.
+          requirement_ambiguity: The tests and the scenarios in delta_specs expect different behavior, so making one pass would break the other and a person must decide which is right.
+          other: The output does not show enough to tell, or the cause fits none of the options above.
+
+  # Evaluated by `openspec-kit dispatch` when BUILD gates fail again after a repair round.
+  repair_progress:
+    mode: advisory
+    assert:
+      - "converging >= 0.25"
+    questions:
+      converging:
+        type: noul
+        instructions: Comparing previous_gate_output with gate_output, did the repair make progress toward passing the gates?
+        criteria:
+          "true": Fewer or narrower failures remain, or failures that were there before are gone and the run now stops at a later step, so another repair round is likely to finish the work.
+          "false": The same tests fail with the same errors, or the repair broke more than it fixed, so another repair round is unlikely to help.
+
+  # Evaluated by `openspec-kit dispatch` after BUILD gates pass, before change_risk.
+  scenario_coverage:
+    mode: advisory
+    assert:
+      - "every_scenario_tested >= 0.6"
+      - "tests_assert_outcomes >= 0.6"
+    questions:
+      every_scenario_tested:
+        type: noul
+        instructions: Does the diff in repos add or change an automated test for every scenario in delta_specs?
+        criteria:
+          "true": Each "#### Scenario:" in delta_specs has a test in the diff that sets up its GIVEN, performs its WHEN and checks its THEN.
+          "false": At least one scenario has no test in the diff that exercises it, or the diff changes no test file at all.
+      tests_assert_outcomes:
+        type: noul
+        instructions: Do the tests in the diff assert the observable results that the scenarios' THEN clauses name?
+        criteria:
+          "true": The tests check concrete results, such as a status code, a stored record, a returned value, an emitted event or a rendered element, matching each THEN.
+          "false": Some tests only run code without asserting, assert something always true, are skipped or pending, or check a result other than the scenario's THEN.
+
+  # Evaluated by `openspec-kit dispatch` after BUILD passes, before queuing for merge.
+  change_risk:
+    mode: advisory
+    block_when:
+      - { question: risk, choice: high, min_confidence: 0.7 }
+      - { question: risk, choice: cannot_tell, min_confidence: 0.0 }
+      - { question: security_sensitive, min: 0.8 }
+      - { question: irreversible_data_change, min: 0.8 }
+    questions:
+      risk:
+        type: choice
+        instructions: How risky is it to release this change without a human review?
+        criteria:
+          low: Additive and isolated, for example new code paths behind existing interfaces, tests, documentation, or internal refactors covered by tests.
+          medium: Changes existing behavior that users or other services rely on, but a code revert fully undoes it and it does not touch stored data or security controls.
+          high: Touches authentication, authorization, payments, personal data, cryptography, data migrations or deletions, infrastructure, or public API contracts, or a revert may not undo its effects.
+          cannot_tell: The proposal and the diff do not show enough to judge the risk.
+      security_sensitive:
+        type: noul
+        instructions: Does the change touch authentication, authorization, secrets, cryptography, or the handling of personal or payment data?
+        criteria:
+          "true": The diff or the proposal changes code or configuration in one of those areas.
+          "false": None of those areas is changed.
+      irreversible_data_change:
+        type: noul
+        instructions: Does the change alter stored data or its schema in a way that reverting the code would not undo?
+        criteria:
+          "true": The change adds or runs a migration, a backfill, a deletion or a format change of persisted data.
+          "false": No persisted data or schema is changed.
+
+  # Evaluated when scoring candidate backlog tasks.
+  task_priority:
+    mode: advisory
+    min_actionable_impact: 0.7
+    reject_choices: ["cannot_tell"]
+    questions:
+      urgency:
+        type: choice
+        instructions: What is the appropriate priority level for this proposed engineering task based on impact and urgency?
+        criteria:
+          critical: Fixes active security vulnerability, prevents irreversible data corruption, or unblocks broken build/CI.
+          high: Fixes customer-facing breakage, unblocks major planned capabilities, or addresses significant performance degradation.
+          normal: Routine feature implementation, scheduled refactoring, or incremental test coverage.
+          low: Cosmetic improvements, internal developer ergonomics, or minor documentation updates.
+          cannot_tell: The description lacks sufficient evidence or impact metrics to assess urgency.
+      actionable_impact:
+        type: noul
+        instructions: Is this task backed by concrete, verifiable evidence and ready for autonomous planning?
+        criteria:
+          "true": The proposal states an observable problem or need with concrete evidence or reproduction steps.
+          "false": The description is vague, speculative, or lacks actionable acceptance criteria.
+
+  # Evaluated by `openspec-kit merge` when a change, rebased onto its base, removes lines that commits
+  # landed on that base after the change started: a teammate's concurrent work, typically dropped while an
+  # agent resolved a rebase conflict. The state lists each such commit with its full message and the lines
+  # the change removes. enforce: a blocking answer sends the change back to the BUILD agent to restore the
+  # work (up to dispatch.conflict_rebuilds), then quarantines it as concurrent_work_loss for a human
+  # (openspec-kit approve <change> integrates it as it is). allow_when overrides block_when.
+  concurrent_work_loss:
+    mode: enforce
+    block_when:
+      - { question: importance, choice: critical, min_confidence: 0.4 }
+      - { question: importance, choice: significant, min_confidence: 0.6 }
+      - { question: importance, choice: cannot_tell, min_confidence: 0.0 }
+    allow_when:
+      - { question: superseded_by_change, min: 0.8 }
+    questions:
+      importance:
+        type: choice
+        instructions: >-
+          How much does it matter if the work in lost_work silently disappears from the base? Judge each
+          commit by its message first (its words, tone and urgency) and confirm with the lines removed; the
+          most important commit decides.
+        criteria:
+          critical: A production or incident fix, hotfix, outage, crash, data loss, security fix, rollback or revert of a breaking change, or a message that signals urgency (for example "hotfix", "production down", "everything exploded", "urgent", "security"), however small its diff.
+          significant: Deliberate work a teammate added on purpose, for example a feature, a bug fix, a behavior or configuration change, a route, a migration or a test.
+          trivial: No behavior is lost, for example whitespace, a trailing newline, formatting, a comment typo or a rename, as a chore, style or docs message states and the removed lines confirm.
+          cannot_tell: The messages and the removed lines do not show what the work was for.
+      superseded_by_change:
+        type: noul
+        instructions: Does the change itself deliberately replace or re-implement the work in lost_work, so nothing it did is actually lost?
+        criteria:
+          "true": change_diff re-adds the same behavior in another form, or the proposal states that it replaces or removes that work on purpose.
+          "false": The lost lines simply disappear and nothing in the change replaces them.
+
+  # Evaluated by `openspec-kit dispatch` and `openspec-kit merge` before an orchestrator_error pauses the
+  # whole workspace. The state carries the error, the stage, and the other changes that failed the same
+  # way in the last hour. Without a matching rule (or without the evaluator) the workspace pauses, as before.
+  system_error_triage:
+    mode: enforce
+    actions:
+      - { question: scope, choice: change_specific, min_confidence: 0.7, action: block_change }
+      - { question: scope, choice: transient, min_confidence: 0.7, action: retry_later }
+    questions:
+      scope:
+        type: choice
+        instructions: >-
+          Does the error in `error` affect only this change, will it most likely go away on its own, or will
+          every change fail the same way until a person fixes the environment? Use other_changes_failing:
+          the same error in other changes points to the workspace.
+        criteria:
+          change_specific: The error names this change's own worktree, branch, files or commits (for example its worktree path already exists, its branch is corrupt, or one of its commits cannot be applied), and no other change fails the same way.
+          transient: A temporary condition such as a lock held by another process (index.lock), a network timeout or reset, a remote that is briefly unreachable, or a resource busy right now.
+          workspace_wide: The machine or the workspace itself is broken for every change, for example permission denied or a read-only file system on shared directories, no space left on device, a missing tool, a corrupt main repository, or a submodule commit that does not exist on its remote.
+          cannot_tell: The error does not show enough to decide.
+
+  # Evaluated by `openspec-kit dispatch` when a BUILD leaves files outside openspec/changes/<change>/ and
+  # repos/ (paths under .github/, config/, openspec/specs/, memory files and kit files never reach the evaluator:
+  # they always go back to the agent). Without a matching rule the agent is asked to revert them, as before.
+  policy_violation_triage:
+    mode: enforce
+    actions:
+      - { question: nature, choice: stray_artifact, min_confidence: 0.8, action: revert_and_continue }
+      - { question: nature, choice: tampering, min_confidence: 0.7, action: quarantine }
+    questions:
+      nature:
+        type: choice
+        instructions: What are the files in `outside` that the agent left outside the paths it may change?
+        criteria:
+          stray_artifact: Leftovers with no intent behind them, for example editor or OS files (.DS_Store), logs, coverage or profiling output, temporary or scratch files, or build output; deleting them loses nothing.
+          tampering: Deliberate edits to files that control the pipeline, the build, deployment, credentials or other people's work, for example scripts, CI or deploy configuration, lock files, or files outside the agent's change written on purpose.
+          cannot_tell: The paths and contents do not show which it is.
+
+  # Evaluated by `openspec-kit dispatch` when every engine of a role failed without changing anything
+  # (exit 75) and no quota or authentication pattern explains it. Without a matching rule the change is
+  # deferred until the engines recover, as before.
+  agent_outcome:
+    mode: enforce
+    actions:
+      - { question: outcome, choice: agent_gave_up, min_confidence: 0.75, action: needs_human }
+      - { question: outcome, choice: environment, min_confidence: 0.75, action: pause }
+    questions:
+      outcome:
+        type: choice
+        instructions: Why did the agent in agent_output stop without changing anything?
+        criteria:
+          provider_outage: The model provider or the agent CLI is down or overloaded (5xx, overloaded, service unavailable, connection errors to the API).
+          quota_or_rate_limit: A usage limit, quota or rate limit (429, too many requests, try again later).
+          auth: A login, token or provider configuration problem.
+          agent_gave_up: The agent ran and decided not to or could not do the task, for example it says the requirement is impossible, contradictory or unclear, or it refuses.
+          environment: The machine is the problem, for example no space left on device, a read-only file system, permission denied in the work directory, or a missing tool.
+          crash: The agent CLI crashed or was killed (segmentation fault, panic, killed, stalled) without a clear cause.
+          cannot_tell: The output does not show why.
+
+  # Evaluated by `openspec-kit merge` when a change and commits that landed on its base after it started
+  # change the same files, even when the rebase was clean: two edits can each be right and contradict
+  # each other. advisory by default; in enforce a contradiction sends the change back (then quarantines
+  # it as semantic_conflict; openspec-kit approve <change> integrates it as it is).
+  semantic_merge_conflict:
+    mode: advisory
+    actions:
+      - { question: relation, choice: contradicts, min_confidence: 0.75, action: send_back }
+      - { question: relation, choice: duplicates, min_confidence: 0.8, action: needs_human }
+    questions:
+      relation:
+        type: choice
+        instructions: >-
+          How does change_diff relate to the concurrent commits in `concurrent` that touch the same files?
+          Read the commit messages for the intent and invariants they state.
+        criteria:
+          compatible: They change different behavior, or the change builds on the concurrent work without undoing it.
+          contradicts: The change breaks what a concurrent commit establishes, for example it reverts or overrides its fix, violates an invariant its message states, or sets a value it deliberately changed.
+          duplicates: Both implement the same thing in different ways, so the result would hold two versions of it.
+          cannot_tell: The diffs and messages do not show how they relate.
+
+  # Evaluated by `openspec-kit merge` when a push is rejected. Without a matching rule the merger retries
+  # (up to 3 attempts, then push_failed, retried after blocked_retry_hours), as before.
+  push_rejection:
+    mode: enforce
+    actions:
+      - { question: kind, choice: policy, min_confidence: 0.75, action: needs_human }
+    questions:
+      kind:
+        type: choice
+        instructions: Why did the remote in remote_output reject the push?
+        criteria:
+          non_fast_forward: Someone pushed first (non-fast-forward, fetch first, stale info); fetching and retrying fixes it.
+          transient: A network or server problem (timeout, connection reset, the remote is unreachable, a 5xx), likely to pass.
+          policy: The remote refuses by rule, for example a protected branch, a required review or status check, a pre-receive hook that declined, or missing write permission; retrying cannot fix it.
+          cannot_tell: The output does not show why.
+
+  # Evaluated by `openspec-kit proposals review` after each cycle when `proposals.approval: evaluator`.
+  proposal_review:
+    mode: enforce
+    assert:
+      - "advances_the_product >= 0.7"
+      - "well_scoped >= 0.7"
+      - "not_duplicate >= 0.7"
+      - "safe_to_automate >= 0.7"
+    questions:
+      advances_the_product:
+        type: noul
+        instructions: Does the proposal advance the product in the direction the roadmap and the existing capabilities describe?
+        criteria:
+          "true": The proposal builds or improves something the roadmap lists, or fixes a concrete gap in an existing capability, with a stated benefit for users or operators.
+          "false": The proposal is speculative, unrelated to the roadmap and the existing capabilities, or changes the product's direction without saying why.
+      well_scoped:
+        type: noul
+        instructions: Is the proposal one cohesive change that an agent can plan and build without further product decisions?
+        criteria:
+          "true": It describes one change with a clear outcome and acceptance hints, small enough for one plan and one build.
+          "false": It bundles several unrelated changes, is open-ended, or leaves product, legal or pricing decisions to the agent.
+      not_duplicate:
+        type: noul
+        instructions: Is the proposal different from every queued change and other proposal, and not already an existing capability?
+        criteria:
+          "true": Nothing in queued_changes, other_proposals or existing_capabilities covers the same outcome.
+          "false": A queued change, another proposal or an existing capability already covers the same outcome.
+      safe_to_automate:
+        type: noul
+        instructions: Can this change be built and integrated autonomously without risking user data, money, security or legal obligations?
+        criteria:
+          "true": A defect in it would be visible and reversible, and it does not touch payments, permissions, personal data retention or irreversible data changes.
+          "false": It touches payments, permissions, personal data retention, irreversible data changes or legal obligations, so a person should decide.

@@ -1,0 +1,125 @@
+# Release of foreman-kit: a tag v<semver> pushed to GitHub verifies the commit (AGENTS.md §4),
+# builds and publishes the GitHub release with GoReleaser (.goreleaser.yaml), then publishes the npm
+# package from the binaries of that release (npm-publish.yml).
+#
+#   git tag v4.1.0 && git push origin v4.1.0        a release; v4.1.0-rc.1 is a prerelease
+#
+# Run by hand (Actions > release > Run workflow) it is a rehearsal: the same verification, a
+# GoReleaser snapshot and the npm package packed, uploaded as the run's artifacts, and nothing
+# published.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The tests install applications: they run the real openspec and agent-memory programs.
+      - name: Install openspec and agent-memory
+        run: npm install -g @fission-ai/openspec@latest @xchucx/agent-memory@0.6.1
+      - name: Configure git for the tests
+        run: |
+          git config --global user.name "foreman-kit CI"
+          git config --global user.email "ci@users.noreply.github.com"
+          git config --global init.defaultBranch main
+      - name: go vet
+        run: go vet ./...
+      - name: Build
+        run: go build -o bin/foreman-kit ./cmd/foreman-kit
+      - name: Tests
+        env:
+          FOREMANKIT_HOME: ${{ runner.temp }}/kit-home
+        run: go test -count=1 -timeout 60m ./...
+      - name: Contract of the evaluator
+        run: ./bin/foreman-kit evaluator-contract
+      - name: Simulations
+        env:
+          FOREMANKIT_HOME: ${{ runner.temp }}/kit-home
+        run: ./bin/foreman-kit sim run "$RUNNER_TEMP/sim-stack" all
+      - name: Fault scenarios
+        env:
+          FOREMANKIT_HOME: ${{ runner.temp }}/kit-home
+        run: ./bin/foreman-kit sim run "$RUNNER_TEMP/sim-stack" faults
+
+  github-release:
+    name: GitHub release
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: ${{ github.ref_type == 'tag' && 'release --clean' || 'release --snapshot --clean' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Keep the snapshot's binaries
+        if: github.ref_type != 'tag'
+        run: |
+          mkdir -p snapshot
+          for d in dist/release/foreman-kit_*; do
+            name="$(basename "$d" | sed -E 's/foreman-kit_([a-z]+)_([a-z0-9]+)_.*/foreman-kit-\1-\2/')"
+            cp "$d/foreman-kit" "snapshot/$name"
+          done
+          cp dist/release/checksums.txt snapshot/
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type != 'tag'
+        with:
+          name: snapshot-binaries
+          path: snapshot/
+
+  npm:
+    name: npm package
+    needs: github-release
+    uses: ./.github/workflows/npm-publish.yml
+    with:
+      tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      dry-run: ${{ github.ref_type != 'tag' }}
+    permissions:
+      contents: read
+      id-token: write
+    secrets: inherit

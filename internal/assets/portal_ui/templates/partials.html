@@ -1,0 +1,132 @@
+{{/* Shared pieces of the portal pages. */}}
+
+{{/* An explained empty state. dict: icon, title, text */}}
+{{define "empty"}}
+<div class="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+  <span class="grid size-12 place-items-center rounded-full bg-base-200 text-base-content/60">{{iconc (or .icon "inbox") "size-6"}}</span>
+  <p class="font-medium">{{.title}}</p>
+  {{if .text}}<p class="max-w-md text-sm text-base-content/60">{{.text}}</p>{{end}}
+</div>
+{{end}}
+
+{{/* Page tabs (sub-pages). dict: tabs ([]tabItem), active (key) */}}
+{{define "page_tabs"}}
+<div role="tablist" class="tabs tabs-lift mb-0 max-w-full" aria-label="Sections">
+  {{$a := .active}}
+  {{range .tabs}}<a role="tab" href="{{.Href}}"{{if ne .Key $a}} title="{{.Label}}"{{end}} class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if eq .Key $a}} tab-active text-base-content [--tab-bg:var(--color-base-100)] {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if eq .Key $a}} aria-selected="true"{{end}}>{{icon .Icon}}<span{{if ne .Key $a}} class="max-sm:sr-only"{{end}}>{{.Label}}</span>{{if .Counts}}<span class="badge badge-sm badge-ghost tabular-nums{{if ne .Key $a}} max-sm:hidden{{end}}">{{.Count}}</span>{{end}}</a>{{end}}
+</div>
+{{end}}
+
+{{/* The pager. Takes *pagerView (nil renders nothing). */}}
+{{/* A link to a change that stands on its own in a row or a list: on a phone it is as tall as a
+     finger. Takes the change name. */}}
+{{define "change_link"}}<a href="/changes/{{enc .}}" class="link link-hover font-mono font-medium touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center">{{.}}</a>{{end}}
+
+{{/* A link to a change inside a sentence: as tall as its line. Takes the change name. */}}
+{{define "change_ref"}}<a href="/changes/{{enc .}}" class="link link-hover font-mono font-medium">{{.}}</a>{{end}}
+
+{{/* The decisions about a blocked change, one route each. dict: name, reason (of the block in
+     force), primary (the first one is the action of the page). A block for the risk of the change
+     is lifted by accepting that risk, so that decision comes first; for any other block it comes
+     last. A button that says only "Unblock" never resets the retries. */}}
+{{define "unblock_btns"}}{{$risk := riskBlock .reason}}
+<div class="flex flex-wrap gap-2">
+  {{if $risk}}<button class="btn btn-sm touch:min-h-11{{if .primary}} btn-primary{{end}}" data-post="/api/changes/{{enc .name}}/risk-approval" data-confirm="Accept the risk of {{.name}}? Its block is lifted, and the change merges although a gate flagged it." data-confirm-title="Accept this risk?" data-confirm-ok="Approve risk" data-toast="Approved the risk of {{.name}}">{{icon "shield-check"}}Approve risk</button>{{end}}
+  <button class="btn btn-sm touch:min-h-11{{if and .primary (not $risk)}} btn-primary{{end}}" data-post="/api/changes/{{enc .name}}/unblock" data-body='{"reset_retries":false}' data-toast="Unblocked {{.name}}">{{icon "lock-open"}}Unblock</button>
+  <button class="btn btn-sm touch:min-h-11" data-post="/api/changes/{{enc .name}}/unblock" data-body='{"reset_retries":true}' data-confirm="Unblock {{.name}} and start its retries over? An accepted risk is withdrawn with them." data-confirm-title="Unblock and reset?" data-confirm-ok="Unblock and reset" data-toast="Unblocked {{.name}} and reset its retries">{{icon "repeat"}}Unblock + reset retries</button>
+  {{if not $risk}}<button class="btn btn-sm touch:min-h-11" data-post="/api/changes/{{enc .name}}/risk-approval" data-confirm="Accepting the risk lets {{.name}} merge although a gate flagged it. This block is for another reason: it stays until you unblock it." data-confirm-title="Accept this risk?" data-confirm-ok="Approve risk" data-toast="Approved the risk of {{.name}}">{{icon "shield-check"}}Approve risk</button>{{end}}
+</div>
+{{end}}
+
+{{/* A text shown by its first three lines, which opens to show the rest. portal.js takes the control
+     away when no line is cut. Takes the text. */}}
+{{define "clamped"}}
+<details class="group text-sm text-base-content/80" data-clamp>
+  <summary class="cursor-pointer list-none touch:min-h-11 [&::-webkit-details-marker]:hidden"><span class="line-clamp-3 group-open:line-clamp-none" data-clamp-text>{{.}}</span><span class="link text-xs text-base-content/60 group-open:hidden">Show all of it</span></summary>
+</details>
+{{end}}
+
+{{/* Run the merger. While the kit is paused nothing starts, and the page says so instead. Takes
+     .Paused. */}}
+{{define "merge_btn"}}
+{{if .}}<p class="max-w-xs text-sm text-base-content/70">The kit is paused: the merger starts nothing until it is resumed.</p>
+{{else}}<button class="btn btn-sm btn-primary touch:min-h-11" data-post="/api/merger/runs" data-toast="Merger started">{{icon "git-merge"}}Run the merger</button>{{end}}
+{{end}}
+
+{{/* A base branch that fails on its own, with the decision a person has about it. Takes the broken
+     base (store.BrokenBase). */}}
+{{define "broken_base_row"}}
+<li class="list-row items-start gap-3 text-sm">
+  {{iconc "git-branch" "mt-0.5 size-5 shrink-0 text-warning"}}
+  <div class="flex min-w-0 flex-col gap-1.5">
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="font-mono font-medium">{{.Repo}}</span><code class="font-mono text-xs">{{printf "%.10s" .SHA}}</code><span class="text-xs text-base-content/60">failing since {{at .Since}}</span></div>
+    <p><b>No change can merge into {{.Repo}}.</b> Its base branch fails its own checks ({{range $i, $c := .FailedChecks}}{{if $i}}, {{end}}{{baseCheck $c}}{{end}}) before any change is applied.{{if eq .OutsideCommits 1}} 1 commit was pushed to it outside the kit.{{else if .OutsideCommits}} {{.OutsideCommits}} commits were pushed to it outside the kit.{{end}}</p>
+    <p class="text-base-content/70"><b class="text-base-content">Choose one:</b> fix the base branch of {{.Repo}}, and the merger integrates the changes it holds by itself; or accept this base: they merge with their own tests, and these failures stay accepted as known for later changes.</p>
+    {{with .Excerpt}}<details class="collapse collapse-arrow bg-base-200"><summary class="collapse-title min-h-0 py-2 text-sm font-medium touch:py-3">Show the failure</summary><div class="collapse-content"><pre class="max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-xs">{{.}}</pre></div></details>{{end}}
+  </div>
+  <div class="flex flex-wrap gap-2 max-md:list-col-wrap md:justify-end">{{template "accept_base_btn" .}}{{template "base_gates_btn"}}</div>
+</li>
+{{end}}
+
+{{/* Give back the lease of a change whose worker is gone. dict: name, primary (it is the action of
+     the page). */}}
+{{define "reclaim_btn"}}<button class="btn btn-sm touch:min-h-11{{if .primary}} btn-primary{{end}}" data-post="/api/changes/{{enc .name}}/reclaim" data-toast="Reclaimed {{.name}}" data-confirm="The worker of {{.name}} is gone. Give its lease back, so that the dispatcher takes the change again?" data-confirm-title="Reclaim {{.name}}?" data-confirm-ok="Reclaim it">{{icon "lock-open"}}Reclaim the change</button>{{end}}
+
+{{/* The name of an event, colored by what it means: failed or refused (error), degraded or stopped (warning), landed (success). */}}
+{{define "event_name"}}{{$t := evtone .}}<span class="inline-flex items-center gap-1.5 font-mono text-sm font-medium {{if eq $t "error"}}text-error{{else if eq $t "warning"}}text-warning{{else if eq $t "success"}}text-success{{else}}text-primary{{end}}">{{if eq $t "error"}}{{iconc "octagon-alert" "size-4 shrink-0"}}{{else if eq $t "warning"}}{{iconc "triangle-alert" "size-4 shrink-0"}}{{else if eq $t "success"}}{{iconc "circle-check" "size-4 shrink-0"}}{{end}}{{.event}}</span>{{end}}
+
+{{/* Run the gates of every repository as the main checkout has it: the base every change is built
+     on, and what the merger checks before it applies one. It is an execution, with its own page:
+     after mending a base that fails, this says whether it passes now. */}}
+{{define "base_gates_btn"}}<button class="btn btn-sm touch:min-h-11" data-post="/api/gates/runs" data-confirm="Run the gates of every repository as the main checkout has it? That is the base every change is built on. It takes as long as the slowest gate, and its page shows it while it runs." data-confirm-title="Run the gates on the base?" data-confirm-ok="Run them" data-toast="Gates started">{{icon "shield-check"}}Run the gates on the base</button>{{end}}
+
+{{/* Accept a base branch that fails on its own. Takes the broken base (store.BrokenBase). */}}
+{{define "accept_base_btn"}}<button class="btn btn-sm touch:min-h-11" data-post="/api/bases/accept" data-body='{"repo":"{{.Repo}}","sha":"{{.SHA}}"}' data-confirm="Accept the base of {{.Repo}} at {{printf "%.8s" .SHA}} as it is? Its failing checks stay accepted for later changes too, and the changes it holds merge with their own tests." data-confirm-title="Accept this base?" data-confirm-ok="Accept base" data-toast="Accepted the base of {{.Repo}}">{{icon "check"}}Accept base…</button>{{end}}
+
+{{/* Decide a proposal. Takes its id. */}}
+{{define "proposal_btns"}}
+<button class="btn btn-sm touch:min-h-11" data-post="/api/proposals/{{enc .}}/approve" data-toast="Approved {{.}}">{{icon "check"}}Approve</button>
+<button class="btn btn-sm touch:min-h-11" data-post="/api/proposals/{{enc .}}/reject" data-confirm="Reject {{.}}? It is not proposed again." data-confirm-title="Reject this proposal?" data-confirm-ok="Reject" data-danger="1" data-toast="Rejected {{.}}">{{icon "x"}}Reject</button>
+{{end}}
+
+{{/*
+  A file viewer: the content is rendered here; portal.js adds find, wrap, copy and Markdown.
+  dict: c (content map: content, size, truncated), name, raw (URL), full (URL of the whole file),
+        md ("rendered" or "source"), follow (bool), id, empty (text when there is no content),
+        stream (URL of the stream that brings what is written from now on), after (where it starts)
+  A followed viewer is read again with the page; a streamed one gets its new text from the stream.
+*/}}
+{{define "viewer"}}{{$id := or .id "viewer"}}{{$has := and .c (str .c.content)}}
+<div class="card card-border min-w-0 bg-base-100" data-viewer data-name="{{.name}}"{{if .md}} data-md="{{.md}}"{{end}}{{if or .follow .stream}} data-follow="1"{{end}}{{if .stream}} data-stream="{{.stream}}" data-stream-after="{{.after}}"{{end}}>
+  <div class="flex flex-wrap items-center gap-2 border-b border-base-content/10 px-3 py-2">
+    <button type="button" class="btn btn-xs text-xs touch:min-h-11" data-v="mode" hidden>{{icon "eye"}}<span>Source</span></button>
+    <label class="input input-sm w-44 max-w-full touch:min-h-11" data-v="findbox">
+      {{iconc "search" "size-3 opacity-60"}}
+      <input type="search" data-v="find" placeholder="Find in file" aria-label="Find in file" class="grow">
+    </label>
+    <span class="font-mono text-xs text-base-content/60 tabular-nums" data-v="count" aria-live="polite"></span>
+    <div class="join">
+      <button type="button" class="join-item btn btn-xs touch:min-h-11 touch:min-w-11" data-v="prev" aria-label="Previous match">{{iconc "arrow-up" "size-3"}}</button>
+      <button type="button" class="join-item btn btn-xs touch:min-h-11 touch:min-w-11" data-v="next" aria-label="Next match">{{iconc "arrow-down" "size-3"}}</button>
+    </div>
+    <label class="flex cursor-pointer items-center gap-2 text-xs touch:min-h-11"><input type="checkbox" class="toggle toggle-xs" data-v="wrap">Wrap lines</label>
+    <span class="grow"></span>
+    {{if .stream}}<span class="flex items-center gap-1.5 text-xs text-info" data-v="live"><span class="status status-info animate-pulse" aria-hidden="true"></span>following the output</span>
+    {{else}}{{with .c}}<span class="font-mono text-xs text-base-content/60 tabular-nums" data-v="info">{{bytes (or .size (len (str .content)))}}{{if .truncated}} · showing the end{{end}}</span>{{end}}{{end}}
+    {{if and .c .c.truncated .full}}<a href="{{.full}}" class="btn btn-xs btn-ghost text-xs touch:min-h-11">{{icon "move-down"}}Load full file</a>{{end}}
+    <button type="button" class="btn btn-xs btn-ghost text-xs touch:min-h-11" data-v="copy">{{icon "copy"}}Copy</button>
+    {{if .raw}}<a class="btn btn-xs btn-ghost text-xs touch:min-h-11" href="{{.raw}}" target="_blank" rel="noopener">{{icon "external-link"}}Raw</a><a class="btn btn-xs btn-ghost text-xs touch:min-h-11" href="{{.raw}}&amp;download=1" download>{{icon "download"}}Download</a>{{end}}
+  </div>
+  {{/* A followed viewer always has its live regions, so output that starts after the page loaded
+       appears on the next refresh: the <pre> (hidden while empty) and the empty state. */}}
+  {{if or $has .follow .stream}}
+  <pre id="{{$id}}"{{if and .follow (not .stream)}} data-live-region{{end}} class="max-h-[70vh] overflow-auto bg-base-200/60 p-4 font-mono text-xs leading-relaxed whitespace-pre empty:hidden" data-v="body" tabindex="0">{{if $has}}{{.c.content}}{{end}}</pre>
+  <div class="hidden px-6 py-5 text-sm leading-relaxed [&_a]:link [&_a]:link-primary [&_blockquote]:border-l-4 [&_blockquote]:border-base-content/20 [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:rounded [&_code]:bg-base-200 [&_code]:px-1 [&_code]:font-mono [&_code]:text-xs [&_h1]:mb-3 [&_h1]:mt-2 [&_h1]:font-display [&_h1]:text-2xl [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:mt-6 [&_h2]:font-display [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:font-semibold [&_h4]:mt-3 [&_h4]:font-semibold [&_hr]:my-4 [&_hr]:border-base-content/10 [&_li]:my-1 [&_ol]:[list-style-type:decimal] [&_ol]:pl-6 [&_p]:my-2 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-box [&_pre]:bg-base-300 [&_pre]:p-3 [&_table]:table [&_table]:table-sm [&_table]:my-3 [&_ul]:[list-style-type:disc] [&_ul]:pl-6" data-v="md"></div>
+  {{end}}
+  {{if .stream}}<div data-v="empty"{{if $has}} hidden{{end}}>{{template "empty" (dict "icon" "file-text" "title" (or .empty "This file is empty.") "text" "")}}</div>
+  {{else if or .follow .id}}<div id="{{$id}}-empty" data-live-region>{{if not $has}}{{template "empty" (dict "icon" "file-text" "title" (or .empty "This file is empty.") "text" "")}}{{end}}</div>
+  {{else if not $has}}{{template "empty" (dict "icon" "file-text" "title" (or .empty "This file is empty.") "text" "")}}
+  {{end}}
+</div>
+{{end}}
+

@@ -1,0 +1,20 @@
+{
+  "name": "@mayeco/foreman-kit",
+  "version": "0.0.0",
+  "description": "Single-binary orchestrator that lets AI coding agents specify, build, verify and integrate an application with OpenSpec",
+  "private": true,
+  "license": "UNLICENSED",
+  "bin": {
+    "foreman-kit": "bin/foreman-kit.js"
+  },
+  "files": [
+    "bin/",
+    "vendor/",
+    "README.md"
+  ],
+  "os": ["darwin", "linux"],
+  "cpu": ["x64", "arm64"],
+  "engines": {
+    "node": ">=18"
+  }
+}

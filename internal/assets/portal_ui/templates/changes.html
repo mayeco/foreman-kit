@@ -1,0 +1,67 @@
+{{/* The list of changes. It draws .Page, the struct its read returns
+     (internal/portal/page_changes_list.go): the state of each change is the one the database gives
+     it, and the filter, the search and the total cover every change. */}}
+
+{{define "changes"}}{{$p := .Page}}
+<header class="mb-5">
+  <h1 class="font-display text-2xl font-bold sm:text-3xl">Changes</h1>
+  <p class="mt-1 max-w-3xl text-sm text-base-content/70">Every change the kit knows, the one something happened to last first. Open one for its story: what ran, what stopped it and what the merger did with it.</p>
+</header>
+
+<div class="mb-4 flex flex-col gap-3">
+  <div role="tablist" class="tabs tabs-box tabs-sm w-fit max-w-full border border-base-content/15 bg-base-100" aria-label="State of the change">
+    {{range $p.Tabs}}<a role="tab" href="{{.Href}}" class="tab shrink-0 flex-nowrap gap-2 whitespace-nowrap touch:min-h-11 touch:min-w-11 {{if .Active}} tab-active text-base-content {{else}} text-base-content/80 hover:text-base-content {{end}}"{{if .Active}} aria-selected="true"{{end}}>{{.Label}}<span class="badge badge-sm badge-ghost tabular-nums">{{.Count}}</span></a>{{end}}
+  </div>
+  <form method="get" action="/changes" role="search" class="join">
+    {{with $p.State}}<input type="hidden" name="state" value="{{.}}">{{end}}
+    <label class="input input-sm join-item w-full touch:min-h-11 sm:w-72">
+      {{iconc "text-search" "size-4 opacity-60"}}
+      <input type="search" name="q" value="{{$p.Query}}" placeholder="Search name or description" aria-label="Search the changes by name or description" class="grow">
+    </label>
+    <button type="submit" class="btn btn-sm join-item touch:min-h-11">Search</button>
+    {{with $p.Clear}}<a href="{{.}}" class="btn btn-sm btn-ghost join-item touch:min-h-11 touch:min-w-11" aria-label="Clear the search">{{icon "x"}}</a>{{end}}
+  </form>
+</div>
+
+<div class="card card-border min-w-0 bg-base-100">
+  {{if $p.Items}}
+  <div class="max-w-full overflow-x-auto">
+    <table class="table table-stack">
+      <thead><tr><th>Change</th><th>State</th><th>Work so far</th><th>Last activity</th></tr></thead>
+      <tbody>
+        {{range $p.Items}}
+        <tr class="align-top hover:bg-base-200/60">
+          <td class="min-w-56 max-w-xl">
+            {{template "change_link" .ChangeName}}
+            {{with .Description}}<p class="mt-0.5 line-clamp-2 text-xs text-base-content/70">{{.}}</p>{{end}}
+          </td>
+          <td>
+            <div class="flex flex-wrap items-center gap-2">
+              {{state "changes.state" .State}}
+              {{/* The priority says what the dispatcher takes first: it says nothing of a change that is done. */}}
+              {{if and (ne .State "integrated") (ne .State "discarded")}}{{if eq .Priority "critical"}}<span class="badge badge-sm badge-error">critical</span>{{else if eq .Priority "high"}}<span class="badge badge-sm badge-warning">high</span>{{end}}{{end}}
+            </div>
+            {{with .OpenBlockReason}}<p class="mt-1 text-xs text-base-content/70">{{label .}}</p>{{end}}
+            {{if .OpenDeferrals}}<p class="mt-1 text-xs text-base-content/70">no engine could take it {{times .OpenDeferrals}}</p>{{end}}
+          </td>
+          <td class="whitespace-nowrap text-sm tabular-nums">{{count .Runs "run" "runs"}} · {{count .Executions "execution" "executions"}}{{if .Repairs}} · {{count .Repairs "repair" "repairs"}}{{end}}</td>
+          <td class="whitespace-nowrap text-sm">{{at .LastActivityAt}}{{with .IntegratedCommit}}<p class="mt-0.5 text-xs text-base-content/60">commit <code class="font-mono">{{printf "%.10s" .}}</code></p>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else if $p.Query}}{{template "empty" (dict "icon" "text-search" "title" "No change matches your search." "text" "Clear the search, or look in another state.")}}
+  {{else if $p.State}}{{template "empty" (dict "icon" "git-branch" "title" "No change is in this state." "text" "Pick another state above.")}}
+  {{else}}{{template "empty" (dict "icon" "git-branch" "title" "The kit knows no change yet." "text" "A change appears here when it enters the backlog.")}}{{end}}
+  {{if $p.Total}}
+  <nav class="flex flex-wrap items-center justify-between gap-3 border-t border-base-content/10 px-4 py-3 text-sm" aria-label="Pages">
+    <span class="text-base-content/70 tabular-nums">{{$p.From}}–{{$p.To}} of {{count $p.Total "change" "changes"}}</span>
+    <div class="flex gap-2">
+      {{if $p.Prev}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Prev}}">{{icon "chevron-left"}}Previous</a>{{end}}
+      {{if $p.Next}}<a class="btn btn-sm touch:min-h-11" href="{{$p.Next}}">Next{{icon "chevron-right"}}</a>{{end}}
+    </div>
+  </nav>
+  {{end}}
+</div>
+{{end}}

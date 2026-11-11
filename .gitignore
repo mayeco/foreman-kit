@@ -157,7 +157,7 @@ CLAUDE.local.md
 # Operational state lives in ~/.foreman-kit/state/<workspace_id>.db.
 /log/
 /.worktrees/
-/bin/foreman-kit
+/bin/
 # A kit upgrade puts a changed template beside your file as <file>.new: review it, merge
 # what you need, delete it. It is never committed.
 *.new

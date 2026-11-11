@@ -73,7 +73,11 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:           "foreman-kit",
-		Short:         "OpenSpec autonomous agent orchestration kit",
+		Short:         "Foreman: autonomous agent orchestration for OpenSpec applications",
+		Long: "Foreman: autonomous agent orchestration for OpenSpec applications.\n\n" +
+			"Run alone in an application, foreman-kit runs its daemon in the foreground: the cycle, the\n" +
+			"dispatcher, the merger and the portal, with the log in the terminal, until Ctrl+C.\n" +
+			"-d starts the same daemon in the background; -w starts the portal alone.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       fmt.Sprintf("%s (%s)", assets.Version, assets.SourceCommit),
@@ -242,8 +246,30 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			}
 			return wrapCode(portal.RunPortalCLI(ctx, root, st, portalKit(st), pArgs, stdout, stderr))
 		}
-		return cmd.Help()
+		return runHere(ctx, cmd, stdout, stderr, buildDaemonOptions, foregroundFlags{
+			port: rootPort, portSet: cmd.Flags().Changed("port"), bind: rootBind,
+			interval: rootInterval, noInitialCycle: rootNoInitialCycle,
+		})
 	}
+
+	// The banner: the large one for foreman-kit alone and its help, one line for every other command
+	// a person runs at a terminal (writeBannerLine stays silent anywhere else).
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if cmd == rootCmd {
+			return
+		}
+		path := strings.Fields(strings.TrimPrefix(cmd.CommandPath(), rootCmd.Name()))
+		if wantsBanner(path, args) {
+			writeBannerLine(stderr, strings.Join(path, " "))
+		}
+	}
+	defaultHelp := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd == rootCmd {
+			writeBanner(stderr)
+		}
+		defaultHelp(cmd, args)
+	})
 
 	// 1. init / install
 	initCmd := &cobra.Command{

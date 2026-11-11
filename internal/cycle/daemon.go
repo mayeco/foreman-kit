@@ -60,6 +60,12 @@ func LoadDaemonConfig(root string) DaemonConfig {
 // a Notifier rather than a poll. Only the cycle's judgment (verify, explore, curate memory) is periodic.
 type DaemonOptions struct {
 	Detach         bool
+	// Console runs the daemon for a person at a terminal (`foreman-kit` alone): its log goes to the
+	// terminal as well as to daemon.log, and Started is told where the portal and the log are.
+	Console bool
+	// Started, when set, is called once the foreground daemon holds its lock and its portal listens,
+	// with the portal's URL ("" without a portal) and the path of its log.
+	Started func(webURL, logPath string)
 	Web            bool
 	WebSet         bool
 	Bind           string
@@ -349,7 +355,7 @@ func runDaemonForeground(
 	var logOut io.Writer = stdout
 	if err == nil {
 		defer logFile.Close()
-		if stdout != os.Stdout {
+		if stdout != os.Stdout || opts.Console {
 			logOut = io.MultiWriter(stdout, logFile)
 		} else {
 			logOut = logFile
@@ -416,6 +422,9 @@ func runDaemonForeground(
 	stopHB := st.StartLockHeartbeat(ctx, "daemon", pid, 2*time.Hour)
 	defer stopHB()
 
+	if opts.Started != nil {
+		opts.Started(webURL, store.RuntimePath(root, "daemon.log"))
+	}
 	fmt.Fprintf(logOut, "[%s] daemon: started pid=%d root=%s interval=%s web=%v %s\n",
 		time.Now().UTC().Format(time.RFC3339), pid, root, interval, webEnabled, webURL)
 

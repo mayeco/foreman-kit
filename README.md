@@ -297,6 +297,7 @@ cd web/portal && npm ci && npm run build   # writes internal/assets/portal_ui/{p
 
 | Command | Description |
 | :--- | :--- |
+| `foreman-kit` | In an application, run its daemon in the foreground with the portal: the cycle, the dispatcher and the merger log to the terminal (and to `daemon.log`), the portal's URL is printed once its port is open, and Ctrl+C stops it (a second Ctrl+C quits at once). Elsewhere it prints the help |
 | `foreman-kit -d` (`--daemon`) | Start the per-project background daemon (continuous merger and dispatcher + the cycle's judgment every `cycle.every` of `.foreman-kit/daemon.yaml`, or `cycle.every_when_out_of_work` after the last one once the workers run out of work and fewer than `queue.max_open` changes are open) |
 | `foreman-kit -w` (`--web`) | Start the embedded Web Portal (`http://127.0.0.1:4567`); combine as `foreman-kit -d -w` |
 | `foreman-kit daemon <status\|stop\|restart\|run>` | Inspect, stop, or restart the current project's background daemon |

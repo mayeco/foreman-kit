@@ -380,3 +380,15 @@ func exists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
+
+// IsApplication reports whether dir holds a Foreman application: the lock `init` writes, the lock of
+// an application installed before the kit was called Foreman, or the kit's own settings files.
+func IsApplication(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	return fileExists(filepath.Join(dir, ".foreman-kit", "kit.lock")) ||
+		fileExists(filepath.Join(dir, LegacyLockFile)) ||
+		fileExists(filepath.Join(dir, ".foreman-kit", "pipeline.yaml")) ||
+		fileExists(filepath.Join(dir, ".foreman-kit", "agents.yaml"))
+}

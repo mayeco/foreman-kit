@@ -22,7 +22,7 @@ The script owns every step that must not depend on a model remembering it. The j
 
 ## State
 
-Under `log/cycle/` (git-ignored) and `config/` (versioned):
+Under `log/cycle/` (git-ignored) and `.foreman-kit/` (versioned):
 
 | File | Purpose |
 | :--- | :--- |

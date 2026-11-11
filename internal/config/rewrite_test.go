@@ -113,14 +113,14 @@ func TestWriteKeepsWhatTheFileHoldsAndShipsTheCommandsOfANewAgent(t *testing.T) 
 		t.Errorf("the comments or the order of the agents were lost:\n%s", written)
 	}
 
-	// An agent of the kit the application no longer uses loses its commands; a binary of its own
-	// keeps them.
+	// Every agent the kit knows keeps its commands, used or not, so one added later runs as written;
+	// a binary of its own keeps them too.
 	if err := Write(root, []string{"codex"}, map[string][]string{"plan": {"codex"}, "build": {"codex"}, "cycle": {"codex"}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	cfg = Load(root)
-	if _, kept := cfg.Commands["claude"]; kept {
-		t.Error("the commands of claude were kept although nothing uses it")
+	if _, kept := cfg.Commands["claude"]; !kept {
+		t.Error("the commands of claude were not kept although the kit knows it")
 	}
 	if _, kept := cfg.Commands["mybot"]; !kept || cfg.Selection != settings.SelectionLeastBusy {
 		t.Errorf("mybot kept: %v, selection %s", kept, cfg.Selection)

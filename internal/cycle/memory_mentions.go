@@ -59,10 +59,16 @@ var memoryMentions = []struct {
 			"in that change's `handoff.md`, not in the memory (`.agent-memory/`)."},
 		{"- The cycle and the visual QA session write only `MEMORY.md`, `memory/`, the backlog and the proposals.",
 			"- The cycle and the visual QA session write only the memory (`.agent-memory/`, with `agent-memory propose`), the backlog and the proposals."},
+		{"├── config/                  settings the binary reads, one file per reader: pipeline.yaml, agents.yaml",
+			"├── .foreman-kit/            settings the binary reads, one file per reader: pipeline.yaml, agents.yaml"},
+		{"The settings live in seven files under `config/`, each key written in its file.",
+			"The settings live in seven files under `.foreman-kit/`, each key written in its file."},
 	}},
 	{"README.md", [][2]string{
 		{"queues new work and curates `MEMORY.md`, the project's long-term memory;",
 			"queues new work and curates the project's long-term memory (`.agent-memory/`, kept with [agent-memory](https://github.com/xChuCx/agent-memory));"},
+		{"The settings live in seven files under `config/`, one per reader:",
+			"The settings live in seven files under `.foreman-kit/`, one per reader:"},
 	}},
 }
 

@@ -1,5 +1,5 @@
 // Package settings is the catalog of an application's configuration: the one definition of every key
-// of its config/ files (the file it lives in, what it accepts, the value the kit ships, what it
+// of its .foreman-kit/ files (the file it lives in, what it accepts, the value the kit ships, what it
 // decides and who reads it) and the one loader of their values. The seeds, `foreman-kit config
 // show | check | set`, `foreman-kit update` and every process that reads a setting take them from
 // here, so a key is named, valued and validated in one place.

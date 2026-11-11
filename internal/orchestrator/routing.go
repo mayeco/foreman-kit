@@ -163,7 +163,7 @@ func triageSystemError(ctx context.Context, judge *evaluator.Judge, st *store.St
 // (they control the pipeline, the specs, or the memory): the evaluator never judges them.
 var protectedRootPrefixes = []string{
 	".github/", ".gitlab-ci.yml", ".gitmodules", ".agents/", ".foreman-kit/kit.lock",
-	".foreman-kit/", "config/", "openspec/specs/", ".agent-memory/", "memory/", "MEMORY.md", "AGENTS.md", "CLAUDE.md", "README.md", "ROADMAP.md",
+	".foreman-kit/", "openspec/specs/", ".agent-memory/", "memory/", "MEMORY.md", "AGENTS.md", "CLAUDE.md", "README.md", "ROADMAP.md",
 }
 
 func isProtectedRootPath(p string) bool {

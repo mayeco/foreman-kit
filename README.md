@@ -13,7 +13,7 @@ All umbrella seeds, templates, skills, and the real-time HTTP/SSE Web Portal are
 ├── cmd/foreman-kit/        CLI entrypoint, flags (-d/--daemon, -w/--web), and subcommands
 ├── internal/
 │   ├── assets/              Embedded files (//go:embed):
-│   │   ├── seeds/           Umbrella project seeds (AGENTS.md, README.md, ROADMAP.md, config/*)
+│   │   ├── seeds/           Umbrella project seeds (AGENTS.md, README.md, ROADMAP.md, .foreman-kit/*)
 │   │   ├── templates/       Templates for child repos, OpenSpec rules and a new memory (authoring_rules.md, repo.yaml, repo_env.sh, memory_conventions.md)
 │   │   ├── skills/          Agent skills installed into target umbrellas (foreman-kit-*)
 │   │   └── portal_ui/       Embedded Web Portal: page templates, compiled daisyUI stylesheet, icons, fonts, portal.js
@@ -106,7 +106,7 @@ anything (`mise run release:snapshot`).
 
 ## 3. Quick Start: Creating and Running an Umbrella Workspace
 
-`foreman-kit` operates on an **umbrella workspace** that holds `openspec/` specifications, `config/`, and one or more child repositories under `repos/<name>/`.
+`foreman-kit` operates on an **umbrella workspace** that holds `openspec/` specifications, `.foreman-kit/`, and one or more child repositories under `repos/<name>/`.
 
 ```bash
 # 1. Initialize a new umbrella workspace: seeds and skills, then `openspec init` (openspec/) and
@@ -236,7 +236,7 @@ cd ../openspec-umbrella
 foreman-kit setup add-repo /path/to/foreman-kit --name foreman-kit
 ```
 
-The parent umbrella receives the seed `AGENTS.md`, `README.md`, `ROADMAP.md`, and `config/` from `internal/assets/seeds/`, and its `.agent-memory/` from `agent-memory init`, while `repos/foreman-kit` remains this clean Go repository.
+The parent umbrella receives the seed `AGENTS.md`, `README.md`, `ROADMAP.md`, and `.foreman-kit/` from `internal/assets/seeds/`, and its `.agent-memory/` from `agent-memory init`, while `repos/foreman-kit` remains this clean Go repository.
 
 ### Web Portal
 

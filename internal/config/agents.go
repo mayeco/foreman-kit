@@ -755,13 +755,14 @@ func Write(root string, agents []string, roles map[string][]string, selection st
 	return WriteFileAtomic(outPath, text, 0o644)
 }
 
-// commandsFor returns the commands .foreman-kit/agents.yaml writes: those of each agent of the
-// application and of each agent a role names, as the file already holds them or as the kit ships
-// them, then those of any other agent the file defines that the kit does not know (a custom binary).
-// The commands of an agent the kit knows that the application no longer uses are not kept.
+// commandsFor returns the commands .foreman-kit/agents.yaml writes: those of every agent the kit
+// knows, so that adding one to agents: or to a role runs as written, as the file already holds them
+// or as the kit ships them (the agents of the application and of the roles come first), then those
+// of any other agent the file defines that the kit does not know (a custom binary).
 func commandsFor(agents, inRoles []string, written map[string]AgentCommandSpec) map[string]any {
 	out := map[string]any{}
-	for _, name := range append(append([]string(nil), agents...), inRoles...) {
+	names := append(append(append([]string(nil), agents...), inRoles...), SupportedOrder...)
+	for _, name := range names {
 		if _, done := out[name]; done {
 			continue
 		}

@@ -11,7 +11,7 @@ import (
 var semverModelRe = regexp.MustCompile(`^jev-[0-9]+\.[0-9]+\.[0-9]+$`)
 
 // builtinCalibrationFixtures holds synthetic states for `foreman-kit evaluator-contract`
-// in memory so no fixture files need to clutter config/.
+// in memory so no fixture files need to clutter .foreman-kit/.
 var builtinCalibrationFixtures = map[string]any{
 	"canary.failing.log": "---- [gate] backend:lint: ruff check .\n---- [pass] backend:lint (1s)\n---- [gate] backend:test: pytest -q\nFAILED tests/test_auth.py::test_session_expiry - AssertionError: 200 != 401\n1 failed, 317 passed in 39.8s\n---- [fail] backend:test (exit 1, 40s)\ngates: FAIL\n",
 	"plan_review.good": map[string]any{

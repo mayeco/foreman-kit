@@ -92,7 +92,8 @@ outage: # every agent of a role is out: a usage limit, a lost login
 #   {{timeout}}      the role's timeout, in seconds
 #   {{args}}         the role's args for this agent; a command without it gets them
 #                    after its last word
-# Add a custom agent binary here with its own entry, then list it in a role.
+# Every agent the kit knows has its commands here, as the kit ships them: add one to agents: or to
+# a role and it runs as written. Add a custom agent binary with its own entry, then list it in a role.
 commands:
   claude:
     run: >-
@@ -112,3 +113,52 @@ commands:
       commit *) Bash(git push *) Bash(git rebase *) Bash(git reset *) Bash(git checkout *)
       Bash(git switch *) Bash(rm -rf *)" {{args}}
     ping: claude -p {{prompt}} --no-session-persistence --max-budget-usd 0.50 {{args}}
+  agy:
+    run: agy -p {{prompt}} --print-timeout {{timeout}}s --dangerously-skip-permissions {{args}}
+    restricted: >-
+      agy -p {{prompt}} --print-timeout {{timeout}}s --dangerously-skip-permissions --sandbox
+      {{args}}
+    ping: agy -p {{prompt}} --print-timeout 170s {{args}}
+  cline:
+    run: cline --yolo --cwd {{workdir}} {{args}} {{prompt}}
+    ping: cline --yolo {{args}} {{prompt}}
+  codex:
+    run: codex exec --dangerously-bypass-approvals-and-sandbox {{args}} {{prompt}}
+    restricted: codex exec --full-auto {{args}} {{prompt}}
+    ping: codex exec {{args}} {{prompt}}
+  copilot:
+    run: >-
+      copilot -p {{prompt}} --silent --allow-all-tools --deny-tool "shell(git commit)"
+      --deny-tool "shell(git push)" --deny-tool "shell(git rebase)" --deny-tool "shell(git
+      reset)" --deny-tool "shell(git checkout)" --deny-tool "shell(git switch)" {{args}}
+    ping: copilot -p {{prompt}} --silent {{args}}
+  crush:
+    run: crush run --quiet {{args}} {{prompt}}
+    ping: crush run --quiet {{args}} {{prompt}}
+    stdin_null: true
+  cursor-agent:
+    run: cursor-agent -p --force --trust {{args}} {{prompt}}
+    restricted: cursor-agent -p --trust --sandbox enabled {{args}} {{prompt}}
+    ping: cursor-agent -p --trust {{args}} {{prompt}}
+  hermes:
+    run: hermes -z {{prompt}} --yolo --accept-hooks {{args}}
+    ping: hermes -z {{prompt}} {{args}}
+  kilo:
+    run: kilo run --agent code --auto {{args}} {{prompt}}
+    restricted: kilo run --agent code {{args}} {{prompt}}
+    ping: kilo run --agent code {{args}} {{prompt}}
+  omp:
+    run: omp -p --no-session --approval-mode=yolo {{args}} {{prompt}}
+    restricted: omp -p --no-session {{args}} {{prompt}}
+    ping: omp -p --no-session {{args}} {{prompt}}
+  opencode:
+    run: opencode run --format json {{args}} {{prompt}}
+    ping: opencode run {{args}} {{prompt}}
+  pi:
+    run: pi -p --no-session --approve {{args}} -- {{prompt}}
+    restricted: pi -p --no-session --no-approve {{args}} -- {{prompt}}
+    ping: pi -p --no-session {{args}} -- {{prompt}}
+  zcode:
+    run: zcode -p {{prompt}} --mode yolo {{args}}
+    restricted: zcode -p {{prompt}} --mode guarded {{args}}
+    ping: zcode -p {{prompt}} {{args}}

@@ -258,7 +258,7 @@ gates:
           cannot_tell: The error does not show enough to decide.
 
   # Evaluated by `foreman-kit dispatch` when a BUILD leaves files outside openspec/changes/<change>/ and
-  # repos/ (paths under .github/, config/, openspec/specs/, memory files and kit files never reach the evaluator:
+  # repos/ (paths under .github/, .foreman-kit/, openspec/specs/, memory files and kit files never reach the evaluator:
   # they always go back to the agent). Without a matching rule the agent is asked to revert them, as before.
   policy_violation_triage:
     mode: enforce

@@ -389,9 +389,11 @@ func sessionsOfStrategies(block string) (string, int) {
 var gateModeLineRe = regexp.MustCompile(`(?m)^(\s+mode:[ \t]*)[A-Za-z"']+`)
 
 // formerNamesInComments are the settings the comments of a block the application keeps (the gates of
-// the evaluator) name by the word an older kit read, with what a comment of today calls each.
+// the evaluator) name by the word an older kit read, with what a comment of today calls each. The
+// paths are whole phrases, so a comment about the application's own config/ is left as it is.
 var formerNamesInComments = []struct{ was, is string }{
 	{"blocked_retry_hours", settings.BlockedRetryAfter.Path()},
+	{"(paths under .github/, config/, openspec/specs/", "(paths under .github/, .foreman-kit/, openspec/specs/"},
 }
 
 // commentsOfToday returns block with the settings its comment lines name written the way today's
@@ -542,6 +544,8 @@ func (c *configData) migratedCommands(values map[settings.Key]any) (map[string]a
 	}
 	sort.Strings(others)
 	add(others)
+	// Every agent the kit knows gets its commands, as the file of today does.
+	add(SupportedOrder)
 
 	budget := ShippedClaudeBudget
 	if raw := c.old(formerBudgetKey); raw != nil {

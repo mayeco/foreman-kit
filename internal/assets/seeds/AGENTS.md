@@ -12,7 +12,7 @@ The umbrella of the application, built specification-first with [OpenSpec](https
 ├── openspec/changes/        changes in progress, and archive/ once integrated
 ├── repos/<name>/            the application's code, one git submodule per repository
 │   └── repo.config.yaml     its base branch, gates, regression suite and when it runs, dev command, env_script, required services
-├── config/                  settings the binary reads, one file per reader: pipeline.yaml, agents.yaml
+├── .foreman-kit/            settings the binary reads, one file per reader: pipeline.yaml, agents.yaml
 │                            (including the commands that run each agent), cycle.yaml, daemon.yaml,
 │                            visual_qa.yaml, exploration.yaml, evaluator.yaml;
 │                            the backlog (agent_backlog.json), history (agent_history.json), and proposals (agent_proposals.json);
@@ -33,7 +33,7 @@ The umbrella of the application, built specification-first with [OpenSpec](https
 5. `foreman-kit portal` serves the embedded real-time HTTP + SSE Web Portal (`http://127.0.0.1:4567`) backed by `log/openspec.db`.
 6. The per-project daemon (`foreman-kit -d`, add `-w` for the portal) runs steps 2 and 3 continuously: its merger integrates each change as soon as it enters the merge queue, and its dispatcher starts each backlog item as soon as it becomes eligible (a new item, a dependency integrated, an unblock, a retry due) and a worker slot is free. Only the cycle's judgment (step 4) is periodic, every `cycle.every` (`.foreman-kit/daemon.yaml`), and it never waits for a dispatch, nor a merge for it. The daemon also starts it `cycle.every_when_out_of_work` after the last cycle began (`never`: never before `cycle.every`), once a worker is free with nothing to start, the queue has room (`queue.max_open`) and a change was built, blocked or integrated in either of the last two cycles; `foreman-kit daemon status` says when the next cycle runs and what it waits for. When every agent of a role is out (a usage limit, a lost login), the daemon defers the work and tries again after a cooldown that grows from 1 to 15 minutes; it never pauses on its own for that. Without the daemon, a scheduled `foreman-kit cycle --detach` merges, judges and dispatches once per run.
 
-The settings live in seven files under `config/`, each key written in its file. A file that lacks a key, holds a value the key does not accept or writes a key nothing reads stops whatever reads it from starting new work until it is mended; `foreman-kit status` says which (`CONFIG:`) and `foreman-kit config check` lists every problem.
+The settings live in seven files under `.foreman-kit/`, each key written in its file. A file that lacks a key, holds a value the key does not accept or writes a key nothing reads stops whatever reads it from starting new work until it is mended; `foreman-kit status` says which (`CONFIG:`) and `foreman-kit config check` lists every problem.
 
 Anything that fails is quarantined in `blocked_changes` (`log/blocked/<change>.json`) with a structured reason and waits for a person; the rest keeps going. Transient reasons (such as a failing gate, a rejected push, or a stale manifest) are retried automatically after `blocked_changes.retry_after` up to `blocked_changes.retries` times (`.foreman-kit/pipeline.yaml`); `foreman-kit status` shows when.
 

@@ -194,6 +194,10 @@ func TestSSHConfigAndAgentResolution(t *testing.T) {
 func TestSSHHostKeyCallbackVerification(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	// The machine's global known_hosts (present on CI runners) must not satisfy the checks below.
+	prevSystem := systemKnownHostsFile
+	systemKnownHostsFile = filepath.Join(tmp, "no_system_known_hosts")
+	t.Cleanup(func() { systemKnownHostsFile = prevSystem })
 
 	// 1. Missing known_hosts with StrictHostKeyChecking=accept-new must fail (never return InsecureIgnoreHostKey)
 	cfgMissing := filepath.Join(tmp, "ssh_config_missing")

@@ -316,6 +316,10 @@ func collectSigners(hostCfg SSHHostConfig) ([]gossh.Signer, error) {
 	return signers, nil
 }
 
+// systemKnownHostsFile is OpenSSH's global known_hosts, consulted after the user's files as ssh does.
+// Tests point it elsewhere: a CI runner ships one (GitHub's carries github.com's keys).
+var systemKnownHostsFile = "/etc/ssh/ssh_known_hosts"
+
 func buildHostKeyCallback(hostCfg SSHHostConfig) (gossh.HostKeyCallback, error) {
 	if hostCfg.StrictHostKeyChecking == "no" {
 		return gossh.InsecureIgnoreHostKey(), nil
@@ -328,7 +332,7 @@ func buildHostKeyCallback(hostCfg SSHHostConfig) (gossh.HostKeyCallback, error) 
 			candidates = append(candidates, filepath.Join(home, ".ssh", "known_hosts"))
 		}
 	}
-	candidates = append(candidates, "/etc/ssh/ssh_known_hosts")
+	candidates = append(candidates, systemKnownHostsFile)
 
 	var files []string
 	seen := make(map[string]bool)

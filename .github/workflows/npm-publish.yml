@@ -98,8 +98,22 @@ jobs:
         with:
           name: npm-package
           path: ${{ steps.pack.outputs.tgz }}
+      # Without the NPM_TOKEN secret nothing is published, and the run does not fail: the package is
+      # still packed and checked above, and the reason is written to the run's summary.
+      - name: NPM_TOKEN present
+        id: token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=npm publish skipped::the secret NPM_TOKEN is not set; the package was packed but not published"
+            echo "npm publish skipped: the secret NPM_TOKEN is not set. The package was packed and checked, not published." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Publish
-        if: ${{ !inputs.dry-run }}
+        if: ${{ !inputs.dry-run && steps.token.outputs.present == 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish "${{ steps.pack.outputs.tgz }}" --access public --provenance --tag "${{ steps.version.outputs.dist-tag }}"

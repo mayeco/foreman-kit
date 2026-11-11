@@ -90,8 +90,10 @@ A release is a tag `v<semver>` pushed to GitHub (`v4.1.0`; `v4.1.0-rc.1` is a pr
 3. **npm package**: `.github/workflows/npm-publish.yml` downloads those binaries, checks their
    checksums, packs `@mayeco/foreman-kit` with `scripts/npm-pack.sh --prebuilt --public`, checks
    that the installed launcher runs, and publishes it with provenance, under the dist-tag `next`
-   for a prerelease and `latest` otherwise. It needs the repository secret `NPM_TOKEN` (an npm
-   automation token that may publish the `@mayeco` scope). Run by hand with a tag, it publishes
+   for a prerelease and `latest` otherwise. It publishes only when the repository secret `NPM_TOKEN`
+   (an npm automation token that may publish the `@mayeco` scope) is set; without it the package is
+   still packed and checked, the run does not fail, and its summary says the publish was skipped.
+   Run by hand with a tag, it publishes
    the npm package of a release that already exists, or only packs it with `dry-run`.
 
 Run by hand (Actions > release > Run workflow), the release workflow is a rehearsal: the same

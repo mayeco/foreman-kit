@@ -13,11 +13,13 @@ import (
 //go:embed all:seeds all:templates all:skills all:portal_ui
 var FS embed.FS
 
-// Version and SourceCommit can be injected at build time via -ldflags.
+// Version, SourceCommit and BuiltAt are injected at build time via -ldflags (scripts/build.sh,
+// .goreleaser.yaml), with the version taken from the git tag v<semver> (scripts/version.sh). A
+// binary built without them (a plain go build) takes them from what Go stamped into it (version.go).
 var (
-	Version      = "4.0.0-go"
-	SourceCommit = "HEAD"
-	BuiltAt      = "2026-11-08T00:00:00Z"
+	Version      = defaultVersion
+	SourceCommit = defaultSourceCommit
+	BuiltAt      = defaultBuiltAt
 )
 
 // ReadTemplate reads a file under .foreman-kit/templates/<rel> from root if present,

@@ -11,8 +11,8 @@
 #                      <dir>/<os>-<arch>/foreman-kit
 #
 # The binary is static (CGO_ENABLED=0) and carries its version, the commit it was built from and
-# when (internal/assets: Version, SourceCommit, BuiltAt). FOREMANKIT_KIT_VERSION overrides the version
-# the source declares. It needs Go on PATH and nothing else.
+# when (internal/assets: Version, SourceCommit, BuiltAt). The version is detected from the git tags
+# (scripts/version.sh); FOREMANKIT_KIT_VERSION overrides it. It needs Go and git on PATH.
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -45,8 +45,8 @@ if [ -z "$TARGETS" ]; then
 fi
 
 PKG="github.com/mayeco/foreman-kit/internal/assets"
-VERSION="${FOREMANKIT_KIT_VERSION:-$(sed -n 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$ROOT/internal/assets/embed.go" | head -n 1)}"
-[ -n "$VERSION" ] || { echo "build: cannot read the version from internal/assets/embed.go" >&2; exit 1; }
+VERSION="$("$ROOT/scripts/version.sh")"
+[ -n "$VERSION" ] || { echo "build: cannot detect the version (scripts/version.sh)" >&2; exit 1; }
 COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
   COMMIT="$COMMIT-dirty"

@@ -108,7 +108,7 @@ func TestPortalStaticAndPageRoutes(t *testing.T) {
 
 	// A page of its own: /changes is rendered on the server with its own title.
 	code, _, raw, hdr = doReq(t, srv, http.MethodGet, "/changes", nil)
-	if code != http.StatusOK || !strings.Contains(hdr.Get("Content-Type"), "text/html") || !strings.Contains(raw, "<title>Changes · OpenSpec Kit</title>") {
+	if code != http.StatusOK || !strings.Contains(hdr.Get("Content-Type"), "text/html") || !strings.Contains(raw, "<title>Changes · Foreman</title>") {
 		t.Fatalf("unexpected page /changes: code=%d", code)
 	}
 

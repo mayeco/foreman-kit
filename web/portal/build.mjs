@@ -57,8 +57,8 @@ function buildIcons() {
     const inner = svg.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim();
     return `<symbol id="${name}" viewBox="0 0 24 24">${inner}</symbol>`;
   });
-  // The favicon is the brand mark: Lucide's git-merge on a clipped signal-cyan plate.
-  const mark = readFileSync(join(lucide, 'git-merge.svg'), 'utf8').replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim();
+  // The favicon is the brand mark: Lucide's hard-hat on a clipped signal-cyan plate.
+  const mark = readFileSync(join(lucide, 'hard-hat.svg'), 'utf8').replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '').trim();
   writeFileSync(join(out, 'favicon.svg'),
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M0 0H24L32 8V32H8L0 24Z" fill="#3ee0f0"/>'
     + `<g transform="translate(4 4)" fill="none" stroke="#06202a" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">${mark}</g></svg>\n`);

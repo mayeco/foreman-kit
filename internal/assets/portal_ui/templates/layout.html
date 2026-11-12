@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}} · OpenSpec Kit</title>
+  <title>{{.Title}} · Foreman</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="/assets/fonts/chakra-petch-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/assets/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
@@ -21,7 +21,7 @@
         {{.Content}}
       </main>
       <footer class="flex flex-wrap items-center justify-between gap-2 border-t border-base-content/10 px-4 py-3 text-xs text-base-content/60 sm:px-6 lg:px-8">
-        <span class="font-mono">foreman-kit · {{.App}}</span>
+        <span class="font-mono"><span title="Built from commit {{kitCommit}}">foreman-kit v{{kitVersion}}</span> · {{.App}}</span>
         <span class="flex items-center gap-3">
           {{/* When the page was read, and whether it reads itself again: the script that refreshes it says here when it cannot. */}}
           <span id="page-read-at" data-live-region class="flex flex-wrap items-center gap-1">{{if not .ReadAt.IsZero}}{{iconc "clock" "size-3"}}read at {{readAt .ReadAt}}{{end}}{{if .Live}}{{if not .ReadAt.IsZero}}<span aria-hidden="true">·</span>{{end}}{{iconc "refresh-cw" "size-3"}}refreshes every {{.Live}}s{{end}}</span>
@@ -122,10 +122,11 @@
 {{define "sidebar"}}
 <aside class="flex min-h-full w-72 flex-col border-r border-base-content/10 bg-base-300" aria-label="Main navigation">
   <a href="/" class="group flex items-center gap-3 px-5 pb-4 pt-5">
-    <span class="grid size-10 shrink-0 place-items-center bg-primary text-primary-content [clip-path:polygon(0_0,calc(100%-10px)_0,100%_10px,100%_100%,10px_100%,0_calc(100%-10px))]">{{iconc "git-merge" "size-5"}}</span>
+    <span class="grid size-10 shrink-0 place-items-center bg-primary text-primary-content [clip-path:polygon(0_0,calc(100%-10px)_0,100%_10px,100%_100%,10px_100%,0_calc(100%-10px))]">{{iconc "hard-hat" "size-6"}}</span>
     <span class="min-w-0">
-      <span class="block font-display text-lg font-bold leading-tight tracking-wide">OpenSpec Kit</span>
+      <span class="block font-display text-lg font-bold leading-tight tracking-wide">Foreman</span>
       <span class="block truncate font-mono text-xs text-base-content/60">{{.App}}</span>
+      <span class="block truncate font-mono text-xs text-base-content/60" title="Built from commit {{kitCommit}}">v{{kitVersion}}</span>
     </span>
   </a>
   <ul id="nav-menu" data-live-region class="menu w-full grow gap-0.5 px-3">
@@ -145,3 +146,4 @@
   </div>
 </aside>
 {{end}}
+

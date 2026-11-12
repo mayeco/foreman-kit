@@ -1239,6 +1239,14 @@ func SelfUpgrade(ctx context.Context, opts SelfUpgradeOptions, out io.Writer) er
 		buildFn = func(ctx context.Context, sourceDir, destBin string) error {
 			ver := assets.Version
 			sha := assets.SourceCommit
+			// The version of the source being built, detected from its git tags.
+			if script := filepath.Join(sourceDir, "scripts", "version.sh"); fileExists(script) {
+				vcmd := exec.CommandContext(ctx, "sh", script)
+				vcmd.Dir = sourceDir
+				if vOut, err := vcmd.Output(); err == nil && strings.TrimSpace(string(vOut)) != "" {
+					ver = strings.TrimSpace(string(vOut))
+				}
+			}
 			if sOut, err := gitx.RunGit(ctx, sourceDir, "rev-parse", "--short=12", "HEAD"); err == nil && strings.TrimSpace(sOut) != "" {
 				sha = strings.TrimSpace(sOut)
 			}

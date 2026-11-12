@@ -74,8 +74,17 @@ depends = ["check"]
 run = "mise run sim"
 
 [tasks.install]
-description = "Install the binary into ~/.local/bin"
-run = "go build -o ~/.local/bin/foreman-kit ./cmd/foreman-kit"
+description = "Install the binary, with the version of the git tags, into ~/.local/bin"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+out="$(mktemp -d)"
+trap 'rm -rf "$out"' EXIT
+scripts/build.sh --out "$out"
+mkdir -p ~/.local/bin
+cp "$out"/*/foreman-kit ~/.local/bin/foreman-kit
+~/.local/bin/foreman-kit version
+'''
 
 [tasks."build:all"]
 description = "Build the static binary for macOS and Linux, amd64 and arm64, into dist/bin/"
@@ -88,6 +97,41 @@ run = "scripts/npm-pack.sh"
 [tasks."npm:install"]
 description = "Build, pack and install foreman-kit globally with npm (NPM=<path> chooses the npm)"
 run = "scripts/npm-install.sh"
+
+# --- Version and release tags (scripts/version.sh, scripts/release-tag.sh) ----
+
+[tasks.version]
+description = "Print the version detected from the git tags (4.1.1-dev.3+<commit> past v4.1.0)"
+run = "scripts/version.sh"
+
+[tasks."version:next"]
+description = "Print the tag the next release would get (v4.0.0 when there is none yet)"
+usage = '''
+arg "[part]" help="Part of the latest release to raise" default="patch" {
+  choices "patch" "minor" "major"
+}
+'''
+run = 'scripts/version.sh --tag --next "${usage_part?}"'
+
+[tasks."release:tag"]
+description = "Create the next release tag v<semver> on HEAD (first one: v4.0.0); --push publishes it"
+usage = '''
+arg "[part]" help="patch, minor, major, or a version X.Y.Z" default="patch"
+flag "--pre <id>" help="A prerelease: <version>-<id>.N (rc, beta)"
+flag "--push" help="Push the tag to origin, which runs the release workflow"
+flag "--dry-run" help="Print the tag it would create and create nothing"
+flag "-y --yes" help="Do not ask before creating it"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+args=("${usage_part?}")
+if [ -n "${usage_pre:-}" ]; then args+=(--pre "$usage_pre"); fi
+if [ "${usage_push:-false}" = "true" ]; then args+=(--push); fi
+if [ "${usage_dry_run:-false}" = "true" ]; then args+=(--dry-run); fi
+if [ "${usage_yes:-false}" = "true" ]; then args+=(--yes); fi
+exec scripts/release-tag.sh "${args[@]}"
+'''
 
 [tasks."release:check"]
 description = "Validate .goreleaser.yaml"

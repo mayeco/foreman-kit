@@ -13,8 +13,8 @@
 #   --public         a package npm may publish. Without it the package is private, and npm refuses
 #                    to publish it; only the release workflow passes it.
 #
-# FOREMANKIT_KIT_VERSION sets the version of the package (default: the one of the source). NPM
-# chooses the npm that packs it (default: npm).
+# FOREMANKIT_KIT_VERSION sets the version of the package (default: the one detected from the git
+# tags, scripts/version.sh). NPM chooses the npm that packs it (default: npm).
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -65,8 +65,8 @@ else
   "$ROOT/scripts/build.sh" --out "$BIN_OUT" $BUILD_ARGS >&2
 fi
 
-# The version build.sh gave the binaries: the source's, or FOREMANKIT_KIT_VERSION.
-VERSION="${FOREMANKIT_KIT_VERSION:-$(sed -n 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$ROOT/internal/assets/embed.go" | head -n 1)}"
+# The version build.sh gave the binaries: the one of the git tags, or FOREMANKIT_KIT_VERSION.
+VERSION="$("$ROOT/scripts/version.sh")"
 
 STAGE="$ROOT/dist/npm/package"
 rm -rf "$ROOT/dist/npm"
@@ -81,7 +81,7 @@ for dir in "$BIN_OUT"/*/; do
 done
 chmod 0755 "$STAGE/bin/foreman-kit.js"
 
-# The version of the package is the binary's (4.0.0-go is a valid semver prerelease).
+# The version of the package is the binary's (4.0.1-dev.3+<commit> is a valid semver prerelease).
 (cd "$STAGE" && "$NPM" pkg set version="$VERSION" >/dev/null)
 if [ "$PUBLIC" = 1 ]; then
   (cd "$STAGE" && "$NPM" pkg delete private >/dev/null)

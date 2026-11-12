@@ -938,6 +938,10 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 		Use:   "version",
 		Short: "Print foreman-kit version",
 		Run: func(cmd *cobra.Command, args []string) {
+			if assets.BuiltAt != "" {
+				fmt.Fprintf(stdout, "foreman-kit v%s (%s, built %s)\n", assets.Version, assets.SourceCommit, assets.BuiltAt)
+				return
+			}
 			fmt.Fprintf(stdout, "foreman-kit v%s (%s)\n", assets.Version, assets.SourceCommit)
 		},
 	}

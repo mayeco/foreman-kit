@@ -636,7 +636,10 @@ func templateFuncs() template.FuncMap {
 		"iconc":     func(name, class string) template.HTML { return iconHTML(name, class) },
 		"agentIcon": agentIcon,
 		"spriteURL": func() string { return spriteURL },
-		"agentLogo": agentLogo,
+		// The version of the running binary and the commit it was built from.
+		"kitVersion": func() string { return assets.Version },
+		"kitCommit":  func() string { return assets.SourceCommit },
+		"agentLogo":  agentLogo,
 		"when": func(v any) template.HTML {
 			t, ok := parseWhen(v)
 			if !ok {

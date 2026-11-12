@@ -34,7 +34,7 @@ All umbrella seeds, templates, skills, and the real-time HTTP/SSE Web Portal are
 ├── .goreleaser.yaml         How a release is built and uploaded to GitHub
 ├── npm/                     The npm package: package.json (private), the Node launcher, its README
 ├── scripts/                 build.sh (static binaries per platform), npm-pack.sh, npm-install.sh
-└── install.sh               Bootstrap script to build or download ~/.local/bin/foreman-kit
+└── install.sh               Installer: the binary of a GitHub release (checksum checked) into ~/.local/bin, or --source
 ```
 
 ---
@@ -48,11 +48,31 @@ All umbrella seeds, templates, skills, and the real-time HTTP/SSE Web Portal are
 - **agent-memory** CLI (`go install github.com/xChuCx/agent-memory/cmd/agent-memory@latest`, or `npm install -g @xchucx/agent-memory`, or a binary of its [releases](https://github.com/xChuCx/agent-memory/releases/latest) on `PATH`). The application's long-term memory is kept with it. `foreman-kit` runs it as a program of its own and does not contain it: `init`, `update`, the preflight and the tests of this repository fail, saying how to install it, on a machine that lacks it. Install it where it stays on `PATH` for every process that runs an agent (a directory of one version of a toolchain manager goes away with that version); `foreman-kit preflight` prints where it finds it.
 - At least one coding agent CLI authenticated on `PATH` (`claude`, `codex`, `copilot`, `hermes`, `opencode`, `agy`, `kilo`, `cline`, `pi`, `omp`, `crush`, `cursor-agent`, `zcode`, or any custom binary configured under `commands:` in `.foreman-kit/agents.yaml`).
 
+### Install from GitHub
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mayeco/foreman-kit/master/install.sh | sh
+# a given release, or another directory than ~/.local/bin:
+curl -fsSL https://raw.githubusercontent.com/mayeco/foreman-kit/master/install.sh | sh -s -- --version v4.0.0 --bin-dir /usr/local/bin
+```
+
+`install.sh` downloads `foreman-kit-<os>-<arch>` of the release (the latest one by default) with its
+`checksums.txt`, checks the SHA-256, and installs it in `~/.local/bin/foreman-kit`. With
+`GITHUB_TOKEN` (or `gh` logged in) it reads the release through them instead of anonymously.
+
+### Install with npm
+
+```bash
+npm install -g @mayeco/foreman-kit
+```
+
+The package carries the binary of each platform; see [below](#build-for-several-platforms-and-install-with-npm).
+
 ### Build from source
 ```bash
 CGO_ENABLED=0 go build -o ~/.local/bin/foreman-kit ./cmd/foreman-kit
-# or run the bootstrap script:
-./install.sh
+# or with the version of the git tags in it (scripts/build.sh):
+./install.sh --source
 ```
 
 ### Build for several platforms, and install with npm
@@ -123,7 +143,7 @@ mise run npm:publish v4.0.0         # publish on npm the package of a release th
 
 `release:preflight` runs here what the workflow verifies (gofmt, `check`, the simulations and the
 fault scenarios, the launcher's tests, `goreleaser check`); `--skip-preflight` tags without it. A
-private repository is published on npm without provenance, which npm refuses there.
+private repository would be published on npm without provenance, which npm refuses there.
 
 ---
 

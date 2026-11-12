@@ -18,5 +18,7 @@ foreman-kit version
 foreman-kit init ../my-platform --agents claude
 ```
 
+Without npm: `curl -fsSL https://raw.githubusercontent.com/mayeco/foreman-kit/master/install.sh | sh`.
+
 The package is built from the repository with `scripts/npm-pack.sh` and installed with
 `scripts/npm-install.sh`; see the repository's README.

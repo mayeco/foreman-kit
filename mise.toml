@@ -90,6 +90,11 @@ cp "$out"/*/foreman-kit ~/.local/bin/foreman-kit
 ~/.local/bin/foreman-kit version
 '''
 
+[tasks."install:release"]
+description = "Install the binary of a GitHub release into ~/.local/bin with install.sh (checksum checked)"
+usage = 'arg "[tag]" help="Release tag (v4.0.0)" default="latest"'
+run = 'sh install.sh --version "${usage_tag?}"'
+
 [tasks."build:all"]
 description = "Build the static binary for macOS and Linux, amd64 and arm64, into dist/bin/"
 run = "scripts/build.sh --all"

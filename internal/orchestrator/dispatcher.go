@@ -2679,8 +2679,8 @@ func (d *Dispatcher) planPhase(ctx context.Context, item BacklogItem, wt string,
 	chgDir := filepath.Join(wt, "openspec", "changes", change)
 	if !dirExists(chgDir) {
 		args := []string{"new", "change", change, "--json"}
-		if item.Description != "" {
-			args = append(args, "--description", item.Description)
+		if desc := sanitizeBacklogText(item.Description); desc != "" {
+			args = append(args, "--description", desc)
 		}
 		res, _ := d.opts.OpenSpecRunner(ctx, wt, args...)
 		if !res.OK {
@@ -3657,7 +3657,7 @@ func (d *Dispatcher) assessRisk(ctx context.Context, item BacklogItem, wt, chang
 	}
 	state := map[string]any{
 		"change":       change,
-		"goal":         item.Description,
+		"goal":         sanitizeBacklogText(item.Description),
 		"proposal":     readFileOrEmpty(filepath.Join(wt, "openspec", "changes", change, "proposal.md")),
 		"capabilities": caps,
 		"repos":        d.childChanges(ctx, wt),
@@ -4046,9 +4046,9 @@ func (d *Dispatcher) triageAgentOutcome(ctx context.Context, change, phase, role
 
 func (d *Dispatcher) buildPlanPrompt(item BacklogItem, wt, feedback string, retried map[string]any) (string, string) {
 	change := item.ChangeName
-	goal := item.Description
+	goal := sanitizeBacklogText(item.Description)
 	if goal == "" {
-		goal = item.Why
+		goal = sanitizeBacklogText(item.Why)
 	}
 	if goal == "" {
 		goal = change

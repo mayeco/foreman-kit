@@ -269,6 +269,23 @@ func IsProtectedChildPath(relPath string, protected []string) bool {
 }
 
 // BacklogItem represents an entry in .foreman-kit/agent_backlog.json or .foreman-kit/agent_history.json.
+const maxBacklogTextBytes = 8 * 1024
+
+func sanitizeBacklogText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) <= maxBacklogTextBytes {
+		return s
+	}
+	const suffix = "... (truncated)"
+	if maxBacklogTextBytes <= len(suffix) {
+		return cutText(s, maxBacklogTextBytes)
+	}
+	return cutText(s, maxBacklogTextBytes-len(suffix)) + suffix
+}
+
 type BacklogItem struct {
 	ChangeName   string         `json:"change_name"`
 	Description  string         `json:"description,omitempty"`
@@ -316,6 +333,8 @@ func BacklogItemFromMap(m map[string]any) BacklogItem {
 	}
 	b, _ := json.Marshal(m)
 	_ = json.Unmarshal(b, &item)
+	item.Description = sanitizeBacklogText(item.Description)
+	item.Why = sanitizeBacklogText(item.Why)
 	// json.Unmarshal drops a list field written as a string ("depends_on": "add-api") or with
 	// non-string items, which silently bypassed dependency and lock scheduling: read both leniently.
 	item.DependsOn = stringListField(m["depends_on"])

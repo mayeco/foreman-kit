@@ -36,3 +36,22 @@ func TestBacklogItemFromMapReadsStringListFields(t *testing.T) {
 		t.Fatalf("locks lost: %+v", item.Locks)
 	}
 }
+
+func TestBacklogItemFromMapClampsHugeText(t *testing.T) {
+	desc := strings.Repeat("é", 50*1024)
+	why := strings.Repeat("🙂", 50*1024)
+	item := BacklogItemFromMap(map[string]any{
+		"change_name": "huge-desc",
+		"description": desc,
+		"why":        why,
+	})
+	if len(item.Description) > maxBacklogTextBytes || len(item.Why) > maxBacklogTextBytes {
+		t.Fatalf("expected backlog text to be clamped to %d bytes, got description=%d why=%d", maxBacklogTextBytes, len(item.Description), len(item.Why))
+	}
+	if !utf8.ValidString(item.Description) || !utf8.ValidString(item.Why) {
+		t.Fatalf("clamped backlog text split a UTF-8 rune: description=%q why=%q", item.Description, item.Why)
+	}
+	if !strings.Contains(item.Description, "... (truncated)") || !strings.Contains(item.Why, "... (truncated)") {
+		t.Fatalf("expected truncation suffix in both values, got description=%q why=%q", item.Description, item.Why)
+	}
+}

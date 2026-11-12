@@ -5,7 +5,8 @@
 # usage: scripts/npm-install.sh [--prefix <dir>] [--all | --target <os>/<arch>...]
 #
 # Packs the binary of this platform (scripts/npm-pack.sh, or the targets given) and installs the
-# tarball with npm install -g, from the file: nothing is downloaded and nothing is published.
+# tarball with npm install -g, from the file: nothing is published, and the launcher runs the binary
+# the package carries (it downloads one from the GitHub release only on a platform it carries none for).
 #
 #   --prefix dir   install under dir (dir/bin/foreman-kit) instead of npm's global prefix
 #   NPM=<path>     the npm to install with (default: npm). The global prefix of an npm a version
@@ -33,7 +34,7 @@ while [ $# -gt 0 ]; do
       PACK_ARGS="$PACK_ARGS --target $2"
       shift
       ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "npm-install: unknown argument $1 (see --help)" >&2; exit 2 ;;
   esac
   shift

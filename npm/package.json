@@ -4,6 +4,14 @@
   "description": "Single-binary orchestrator that lets AI coding agents specify, build, verify and integrate an application with OpenSpec",
   "private": false,
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mayeco/foreman-kit.git"
+  },
+  "homepage": "https://github.com/mayeco/foreman-kit#readme",
+  "bugs": {
+    "url": "https://github.com/mayeco/foreman-kit/issues"
+  },
   "bin": {
     "foreman-kit": "bin/foreman-kit.js"
   },
@@ -12,8 +20,17 @@
     "vendor/",
     "README.md"
   ],
-  "os": ["darwin", "linux"],
-  "cpu": ["x64", "arm64"],
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "engines": {
     "node": ">=18"
   }

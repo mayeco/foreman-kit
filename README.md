@@ -64,8 +64,12 @@ CGO_ENABLED=0 go build -o ~/.local/bin/foreman-kit ./cmd/foreman-kit
 
 `scripts/npm-pack.sh` (same options) lays out the npm package from `npm/` with those binaries
 under `vendor/<os>-<arch>/` and a Node launcher that runs the one of the machine, and packs it into
-`dist/mayeco-foreman-kit-<version>.tgz`. `scripts/npm-install.sh` packs it and installs that file
-globally with `npm install -g`, or under a directory with `--prefix <dir>`:
+`dist/mayeco-foreman-kit-<version>.tgz`. On a platform the package carries no binary for (or with
+`--launcher-only`, which carries none), the launcher downloads `foreman-kit-<os>-<arch>` from the
+GitHub release `v<version>` of the package, checks it against the release's `checksums.txt`, and
+keeps it in `~/.cache/foreman-kit/<version>/` (`$XDG_CACHE_HOME` when set), so it downloads once per
+version. `scripts/npm-install.sh` packs it and installs that file globally with `npm install -g`, or
+under a directory with `--prefix <dir>`:
 
 ```bash
 NPM=/opt/homebrew/bin/npm scripts/npm-install.sh
@@ -74,8 +78,9 @@ NPM=/opt/homebrew/bin/npm scripts/npm-install.sh
 `NPM` chooses the npm. The global prefix of an npm a version manager provides (mise, nvm, fnm)
 belongs to one version of Node, and an agent or a daemon started with another one does not find
 `foreman-kit` there; the script says so, and says whether `PATH` finds another `foreman-kit`
-first. Nothing is published: the package is marked private, and npm refuses to publish it. A
-package of this platform alone is about 10 MB; with `--all`, about 40 MB.
+first. Nothing is published: a package packed without `--public` is private, and npm refuses to
+publish it. A package of this platform alone is about 10 MB; with `--all`, about 40 MB. The tests of
+the launcher run offline: `node --test npm/test/`.
 
 ### Releases (GoReleaser and GitHub Actions)
 
@@ -88,9 +93,12 @@ A release is a tag `v<semver>` pushed to GitHub (`v4.1.0`; `v4.1.0-rc.1` is a pr
    binary for macOS and Linux on amd64 and arm64 with the tag's version in it, and uploads each one
    as `foreman-kit-<os>-<arch>` (what `install.sh` downloads) with `checksums.txt`.
 3. **npm package**: `.github/workflows/npm-publish.yml` downloads those binaries, checks their
-   checksums, packs `@mayeco/foreman-kit` with `scripts/npm-pack.sh --prebuilt --public`, checks
-   that the installed launcher runs, and publishes it with provenance, under the dist-tag `next`
-   for a prerelease and `latest` otherwise. It publishes only when the repository secret `NPM_TOKEN`
+   checksums, packs `@mayeco/foreman-kit` with `scripts/npm-pack.sh --prebuilt --public` at the
+   tag's version (the only place the package's version is set: `npm/package.json` is never edited
+   for a release), runs the launcher's tests, checks that the installed launcher runs the binary it
+   carries and, without it, downloads the one of the release, and publishes it with provenance,
+   under the dist-tag `next` for a prerelease and `latest` otherwise; a version npm already has is
+   not published again. It publishes only when the repository secret `NPM_TOKEN`
    (an npm automation token that may publish the `@mayeco` scope) is set; without it the package is
    still packed and checked, the run does not fail, and its summary says the publish was skipped.
    Run by hand with a tag, it publishes
@@ -101,6 +109,21 @@ verification, a GoReleaser snapshot and the npm package packed, kept as the run'
 nothing published. Locally, `goreleaser check` validates the configuration and
 `goreleaser release --snapshot --clean` builds the release into `dist/release/` without uploading
 anything (`mise run release:snapshot`).
+
+With mise (`mise install` once: Go, GoReleaser and `gh`, the versions of `mise.toml`):
+
+```bash
+mise run release:rehearse           # optional: the release workflow on GitHub, nothing published
+mise run release                    # committed and pushed? preflight, then tag v<next patch> and push it
+mise run release minor              # or minor, major, an X.Y.Z; --pre rc for v<X.Y.Z>-rc.N (npm: next)
+mise run release:watch              # follow the workflow: verify -> GitHub release -> npm package
+mise run release:status             # the latest GitHub releases and the dist-tags of npm
+mise run npm:publish v4.0.0         # publish on npm the package of a release that exists already
+```
+
+`release:preflight` runs here what the workflow verifies (gofmt, `check`, the simulations and the
+fault scenarios, the launcher's tests, `goreleaser check`); `--skip-preflight` tags without it. A
+private repository is published on npm without provenance, which npm refuses there.
 
 ---
 

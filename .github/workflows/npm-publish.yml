@@ -2,12 +2,20 @@
 # foreman-kit: release.yml calls it after GoReleaser, and it can be run by hand for a release that
 # exists already (Actions > npm-publish > Run workflow, with the tag).
 #
-# The package is laid out by scripts/npm-pack.sh --prebuilt --public; the one in the repository is
-# private, so nothing but this workflow publishes it. A version with a prerelease part (4.1.0-rc.1)
-# is published under the dist-tag next, any other under latest.
+# The package is laid out by scripts/npm-pack.sh --prebuilt --public: it carries the binary of every
+# platform of the release under vendor/<os>-<arch>/, and its launcher downloads the one of the
+# release (checked against checksums.txt, cached in ~/.cache/foreman-kit/<version>) when the package
+# carries none for the machine. Its version is the tag's, set here and nowhere else: each release
+# publishes the package of that version, and npm/package.json in the repository is never edited.
+# A package packed without --public is private, so nothing but this workflow publishes it. A version
+# with a prerelease part (4.1.0-rc.1) is published under the dist-tag next, any other under latest;
+# a version npm has already is not published again.
 #
 # Needs the repository secret NPM_TOKEN: an npm automation token of an account that may publish the
-# @mayeco scope. The package is published with provenance (the repository is public).
+# @mayeco scope. From a public repository the package is published with provenance; npm refuses
+# provenance from a private one, so there it is published without it. The releases of a private
+# repository cannot be downloaded anonymously: the package then works only on the platforms it
+# carries (all four the release builds), and the check of the download is skipped.
 name: npm-publish
 
 on:
@@ -88,11 +96,25 @@ jobs:
           tgz="$(scripts/npm-pack.sh --prebuilt release --public)"
           echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
           tar -tzf "$tgz"
-      - name: Check the launcher runs the binary
+      - name: Tests of the launcher
+        run: node --test npm/test/
+      - name: Check the launcher runs the binary it carries
         run: |
           dir="$(mktemp -d)"
           npm install --global --prefix "$dir" "${{ steps.pack.outputs.tgz }}"
-          "$dir/bin/foreman-kit" version
+          "$dir/bin/foreman-kit" version | tee version.txt
+          # A snapshot's binaries carry GoReleaser's version, not the package's 0.0.0-snapshot.<n>.
+          if [ -n "${{ inputs.tag }}" ]; then grep -F "${{ steps.version.outputs.version }}" version.txt; fi
+      # Without the binary of the platform, the launcher downloads the one of the release.
+      - name: Check the launcher downloads the binary of the release
+        if: inputs.tag != '' && !github.event.repository.private
+        run: |
+          dir="$(mktemp -d)"
+          npm install --global --prefix "$dir" "${{ steps.pack.outputs.tgz }}"
+          rm -rf "$dir"/lib/node_modules/@mayeco/foreman-kit/vendor
+          XDG_CACHE_HOME="$dir/cache" "$dir/bin/foreman-kit" version | tee version.txt
+          grep -F "${{ steps.version.outputs.version }}" version.txt
+          test -x "$dir/cache/foreman-kit/${{ steps.version.outputs.version }}/foreman-kit"
       - uses: actions/upload-artifact@v4
         if: inputs.dry-run
         with:
@@ -116,4 +138,15 @@ jobs:
         if: ${{ !inputs.dry-run && steps.token.outputs.present == 'true' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish "${{ steps.pack.outputs.tgz }}" --access public --provenance --tag "${{ steps.version.outputs.dist-tag }}"
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          if npm view "@mayeco/foreman-kit@$version" version >/dev/null 2>&1; then
+            echo "@mayeco/foreman-kit@$version is already on npm; nothing to publish"
+            exit 0
+          fi
+          provenance=--provenance
+          if [ "${{ github.event.repository.private }}" = true ]; then
+            provenance=""
+            echo "::notice title=npm publish without provenance::the repository is private"
+          fi
+          npm publish "${{ steps.pack.outputs.tgz }}" --access public $provenance --tag "${{ steps.version.outputs.dist-tag }}"

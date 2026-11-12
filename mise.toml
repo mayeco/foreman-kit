@@ -1,5 +1,9 @@
 [tools]
 go = "1.27.4"
+# The release: GoReleaser builds it (the workflow uses the same major), gh tags, dispatches and
+# watches the workflows of GitHub.
+goreleaser = "2.20.0"
+gh = "2.103.3"
 
 [env]
 # Static binary invariant: never link Cgo (see AGENTS.md §3).
@@ -94,6 +98,14 @@ run = "scripts/build.sh --all"
 description = "Pack the npm package (private) of this platform into dist/"
 run = "scripts/npm-pack.sh"
 
+[tasks."npm:pack:all"]
+description = "Pack the npm package (private) with the binaries of macOS and Linux, amd64 and arm64"
+run = "scripts/npm-pack.sh --all"
+
+[tasks."npm:test"]
+description = "Run the offline tests of the npm launcher (bundled binary, cache, checked download)"
+run = "node --test npm/test/"
+
 [tasks."npm:install"]
 description = "Build, pack and install foreman-kit globally with npm (NPM=<path> chooses the npm)"
 run = "scripts/npm-install.sh"
@@ -136,6 +148,101 @@ exec scripts/release-tag.sh "${args[@]}"
 [tasks."release:check"]
 description = "Validate .goreleaser.yaml"
 run = "goreleaser check"
+
+[tasks."release:git"]
+description = "Fail unless the checkout is committed and HEAD is pushed to its branch on origin"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "release:git: the checkout has uncommitted changes; commit them before releasing" >&2
+  exit 1
+fi
+git fetch --quiet origin
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$branch" 2>/dev/null || true)" ]; then
+  echo "release:git: HEAD is not origin/$branch; push the branch before tagging it" >&2
+  exit 1
+fi
+echo "release:git: $(git rev-parse --short=12 HEAD) of $branch is committed and pushed"
+'''
+
+[tasks."release:preflight"]
+description = "What the release workflow verifies, run here first: gofmt, check, simulations, launcher tests, GoReleaser config"
+depends = ["fmt:check", "check", "npm:test", "release:check"]
+run = ["mise run sim", "mise run sim:faults"]
+
+[tasks.release]
+description = "Release: preflight, then create the next tag v<semver> and push it (the workflow builds the GitHub release and publishes npm)"
+usage = '''
+arg "[part]" help="patch, minor, major, or a version X.Y.Z" default="patch"
+flag "--pre <id>" help="A prerelease: <version>-<id>.N (rc, beta), published on npm under next"
+flag "--skip-preflight" help="Tag and push without running release:preflight first"
+flag "-y --yes" help="Do not ask before creating the tag"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+mise run release:git
+if [ "${usage_skip_preflight:-false}" != "true" ]; then
+  mise run release:preflight
+fi
+args=("${usage_part?}" --push)
+if [ -n "${usage_pre:-}" ]; then args+=(--pre "$usage_pre"); fi
+if [ "${usage_yes:-false}" = "true" ]; then args+=(--yes); fi
+scripts/release-tag.sh "${args[@]}"
+echo "release: follow it with: mise run release:watch"
+'''
+
+[tasks."release:watch"]
+description = "Watch the latest run of the release workflow until it ends"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+sleep 5
+id="$(gh run list --workflow release.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+[ -n "$id" ] || { echo "release:watch: no run of release.yml yet" >&2; exit 1; }
+gh run watch "$id" --exit-status
+'''
+
+[tasks."release:status"]
+description = "Show the latest GitHub release and the versions of the npm package"
+run = '''
+#!/usr/bin/env bash
+set -uo pipefail
+gh release list --limit 3
+echo "npm @mayeco/foreman-kit:"
+npm view @mayeco/foreman-kit dist-tags 2>/dev/null || echo "  not published yet"
+'''
+
+[tasks."release:rehearse"]
+description = "Run the release workflow on GitHub without publishing: verification, GoReleaser snapshot, npm package packed"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+gh workflow run release.yml --ref "$(git rev-parse --abbrev-ref HEAD)"
+mise run release:watch
+'''
+
+[tasks."npm:publish"]
+description = "Publish on npm the package of a GitHub release that exists already (default: the latest release)"
+usage = '''
+arg "[tag]" help="Release tag whose binaries are published (v4.1.0); default: the latest release"
+flag "--dry-run" help="Pack and check the package on GitHub, keep it as an artifact, publish nothing"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+tag="${usage_tag:-}"
+if [ -z "$tag" ]; then
+  tag="$(gh release view --json tagName -q .tagName)"
+fi
+dry="${usage_dry_run:-false}"
+gh workflow run npm-publish.yml --ref "$(git rev-parse --abbrev-ref HEAD)" -f tag="$tag" -f dry-run="$dry"
+sleep 5
+id="$(gh run list --workflow npm-publish.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+gh run watch "$id" --exit-status
+'''
 
 [tasks."release:snapshot"]
 description = "Build a release locally with GoReleaser into dist/release/; nothing is published"

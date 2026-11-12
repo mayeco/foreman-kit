@@ -109,7 +109,7 @@ run = "scripts/npm-pack.sh --all"
 
 [tasks."npm:test"]
 description = "Run the offline tests of the npm launcher (bundled binary, cache, checked download)"
-run = "node --test npm/test/"
+run = "node --test 'npm/test/*.test.js'"
 
 [tasks."npm:install"]
 description = "Build, pack and install foreman-kit globally with npm (NPM=<path> chooses the npm)"

@@ -97,7 +97,7 @@ jobs:
           echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
           tar -tzf "$tgz"
       - name: Tests of the launcher
-        run: node --test npm/test/
+        run: node --test 'npm/test/*.test.js'
       - name: Check the launcher runs the binary it carries
         run: |
           dir="$(mktemp -d)"

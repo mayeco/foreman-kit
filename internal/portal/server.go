@@ -394,6 +394,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			path = "/api/"
 		}
 		r = withPath(r, path)
+		if !muxTakesAPIMethod(r.Method) {
+			s.apiNoRoute(w, r)
+			return
+		}
 	case strings.HasPrefix(path, "/assets/"):
 		r = withPath(r, path)
 	default:

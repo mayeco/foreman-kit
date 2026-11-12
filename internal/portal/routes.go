@@ -12,8 +12,9 @@ import (
 )
 
 // Every address the portal answers is declared here, on one http.ServeMux: its method and its
-// pattern, with the name of what it is about read from the pattern (r.PathValue). A request with a
-// method an address does not take is answered 405 by the mux itself.
+// pattern, with the name of what it is about read from the pattern (r.PathValue). On the API, a
+// request that no route takes is answered by apiNoRoute; on any other address, a method it does not
+// take is answered 405 by the mux itself.
 
 // router returns the mux with every route of the portal: the assets, the API, the streams and the
 // pages.
@@ -30,7 +31,8 @@ func (s *Server) router() *http.ServeMux {
 		s.visualRoutes(mux)
 		s.systemRoutes(mux)
 		// An address of the API that no route takes. The page that answers every other unknown address
-		// is for GET alone, so these are per method too: one for all methods would conflict with it.
+		// is for GET alone, so these are per method too: one for all methods would conflict with it,
+		// and a method outside apiMethods is sent to apiNoRoute before the mux (muxTakesAPIMethod).
 		for _, method := range apiMethods {
 			mux.HandleFunc(method+" /api/", s.apiNoRoute)
 		}
@@ -44,6 +46,21 @@ func (s *Server) router() *http.ServeMux {
 
 // apiMethods are the methods the API has routes for.
 var apiMethods = []string{http.MethodGet, http.MethodPost, http.MethodDelete}
+
+// muxTakesAPIMethod reports whether the mux has routes (and an /api/ catch-all) for method: the
+// methods of apiMethods, and HEAD, which the mux matches to GET routes. Any other method on an
+// /api/ address would fall through to the mux's plain-text 405 and is sent to apiNoRoute instead.
+func muxTakesAPIMethod(method string) bool {
+	if method == http.MethodHead {
+		return true
+	}
+	for _, m := range apiMethods {
+		if method == m {
+			return true
+		}
+	}
+	return false
+}
 
 // apiNoRoute answers a request of the API that no route takes: 405 with the methods its address
 // does take, when it takes some, and 404 when the address is not of the API at all.

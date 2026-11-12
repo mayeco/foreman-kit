@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -32,9 +34,37 @@ func TestEveryRouteIsDeclaredWithItsMethod(t *testing.T) {
 	if code != http.StatusMethodNotAllowed || hdr.Get("Allow") != "GET, POST" {
 		t.Errorf("DELETE /api/backlog = %d, Allow %q; want 405 with Allow: GET, POST", code, hdr.Get("Allow"))
 	}
-	// A method the API has no route for at all is the mux's own 405.
-	if code, _, _, _ := doReq(t, srv, http.MethodPut, "/api/dashboard", map[string]any{}); code != http.StatusMethodNotAllowed {
-		t.Errorf("PUT /api/dashboard = %d, want 405", code)
+	// A method the API has no route for at all still answers through apiNoRoute: JSON 405 with the
+	// exact Allow header on a known address, and JSON 404 without Allow on an unknown one.
+	code, body, _, hdr = doReq(t, srv, http.MethodPut, "/api/dashboard", map[string]any{})
+	if c, msg := errorOf(body); code != http.StatusMethodNotAllowed || hdr.Get("Allow") != "GET" || c != "method_not_allowed" || !strings.Contains(msg, "GET") || !strings.Contains(hdr.Get("Content-Type"), "application/json") {
+		t.Errorf("PUT /api/dashboard = %d, Allow %q, %v (%s); want JSON 405 with Allow: GET", code, hdr.Get("Allow"), body, hdr.Get("Content-Type"))
+	}
+	for _, tc := range []struct {
+		path      string
+		wantCode  int
+		wantErr   string
+		wantAllow string
+	}{
+		{path: "/api/dashboard", wantCode: http.StatusMethodNotAllowed, wantErr: "method_not_allowed", wantAllow: "GET"},
+		{path: "/api/system/settings", wantCode: http.StatusMethodNotAllowed, wantErr: "method_not_allowed", wantAllow: "GET, POST"},
+		{path: "/api/no-such-thing", wantCode: http.StatusNotFound, wantErr: "not_found", wantAllow: ""},
+	} {
+		for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodOptions} {
+			var payload any
+			if method != http.MethodOptions {
+				payload = map[string]any{}
+			}
+			code, body, _, hdr := doReq(t, srv, method, tc.path, payload)
+			c, _ := errorOf(body)
+			if code != tc.wantCode || c != tc.wantErr || hdr.Get("Allow") != tc.wantAllow || !strings.Contains(hdr.Get("Content-Type"), "application/json") {
+				t.Errorf("%s %s = %d, code %q, Allow %q, Content-Type %q; want %d, code %q, Allow %q, application/json",
+					method, tc.path, code, c, hdr.Get("Allow"), hdr.Get("Content-Type"), tc.wantCode, tc.wantErr, tc.wantAllow)
+			}
+			if tc.wantAllow == "" && len(hdr.Values("Allow")) > 0 {
+				t.Errorf("%s %s set an empty Allow header %v; want no Allow header", method, tc.path, hdr.Values("Allow"))
+			}
+		}
 	}
 
 	// An address of the API nobody declared: 404, as JSON, with any method.
@@ -101,6 +131,77 @@ func TestNoPatternOfTheRouterConflicts(t *testing.T) {
 	if srv.router() == nil {
 		t.Fatal("no router")
 	}
+}
+
+// TestEveryAPIRouteUsesAnAPIMethod: apiNoRoute probes only apiMethods and ServeHTTP sends any
+// other method on /api/ to apiNoRoute before the mux, so a route registered under /api/ with a
+// method outside apiMethods would be unreachable and missing from Allow.
+func TestEveryAPIRouteUsesAnAPIMethod(t *testing.T) {
+	srv, _, _ := setupTestPortal(t)
+	unlisted, total := unlistedAPIRoutes(t, srv.router())
+	if total == 0 {
+		t.Fatal("no /api/ routes were read from the router")
+	}
+	for _, pat := range unlisted {
+		t.Errorf("route %q is under /api/ with a method not in apiMethods (%v)", pat, apiMethods)
+	}
+
+	// Verify the check catches a route registered with a method outside apiMethods.
+	tmp := http.NewServeMux()
+	tmp.HandleFunc("GET /api/ok", func(http.ResponseWriter, *http.Request) {})
+	tmp.HandleFunc("PUT /api/x", func(http.ResponseWriter, *http.Request) {})
+	got, _ := unlistedAPIRoutes(t, tmp)
+	if len(got) != 1 || got[0] != "PUT /api/x" {
+		t.Errorf("unlistedAPIRoutes with PUT /api/x = %v, want [PUT /api/x]", got)
+	}
+}
+
+// unlistedAPIRoutes returns every pattern registered on mux under /api/ whose method is not in
+// apiMethods, along with the total number of /api/ patterns inspected.
+func unlistedAPIRoutes(t *testing.T, mux *http.ServeMux) (unlisted []string, total int) {
+	t.Helper()
+	allowed := map[string]bool{}
+	for _, m := range apiMethods {
+		allowed[m] = true
+	}
+	idx := reflect.ValueOf(mux).Elem().FieldByName("index")
+	seen := map[string]bool{}
+	collect := func(pat reflect.Value) {
+		p := pat.Elem().FieldByName("str").String()
+		seen[p] = true
+	}
+	multis := idx.FieldByName("multis")
+	for i := 0; i < multis.Len(); i++ {
+		collect(multis.Index(i))
+	}
+	segments := idx.FieldByName("segments")
+	iter := segments.MapRange()
+	for iter.Next() {
+		list := iter.Value()
+		for i := 0; i < list.Len(); i++ {
+			collect(list.Index(i))
+		}
+	}
+	var patterns []string
+	for p := range seen {
+		patterns = append(patterns, p)
+	}
+	sort.Strings(patterns)
+	for _, p := range patterns {
+		method, path, hasMethod := strings.Cut(p, " ")
+		if !hasMethod {
+			method, path = "", p
+		}
+		path = strings.TrimSpace(path)
+		if path != "/api" && !strings.HasPrefix(path, "/api/") {
+			continue
+		}
+		total++
+		if !allowed[method] {
+			unlisted = append(unlisted, p)
+		}
+	}
+	return unlisted, total
 }
 
 // TestARequestBodyIsBounded: an action reads a few fields. A body larger than the limit is not read

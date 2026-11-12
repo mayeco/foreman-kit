@@ -250,6 +250,7 @@ On startup, `foreman-kit` loads a dotenv-format `.env` file from the directory i
 | `TEST_ENV_NUMBER`, `PORT`, `FOREMANKIT_CHANGED_FILES`, `CI`, `NONINTERACTIVE`, `GIT_TERMINAL_PROMPT`, `GIT_MERGE_AUTOEDIT`, `LANG`, `LC_ALL` | Set by the kit for the gates and the commands of a repository: the number and the port of the slot (3000 plus 10 for each slot), the files the change touched, and what keeps a command from waiting for a person or writing in another encoding |
 | `CYCLE_STAMP` | The name of a cycle, set by the kit for the process that runs it |
 | `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GIT_ASKPASS` | Taken out of the environment of the agents a worker runs: what reaches a remote is the merger's to push |
+| `TERM`, `COLORTERM`, `NO_COLOR` | How the banner of `foreman-kit` alone is drawn on a terminal: `TERM=dumb` leaves it out, `NO_COLOR` set draws it without color, `COLORTERM=truecolor` or `24bit` gives it 24-bit color |
 | `AGENT_STUB`, `FOREMANKIT_FORCE_BUILTIN`, `FOREMANKIT_SIM_STRICT` | For tests and simulations: the script the agent named `stub` runs, `1` to check a change without the `openspec` CLI, and `1` to make `foreman-kit sim` fail on a known gap |
 
 \* Or a credentials file. When the variable is not set, the key is read from the first existing file among `$XDG_CONFIG_HOME/jev/credentials.json`, `~/.config/jev/credentials.json`, and `~/.jev/credentials.json` (JSON field `api_key`, `apiKey`, `token`, or `key`).

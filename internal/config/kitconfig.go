@@ -470,6 +470,7 @@ func environmentVariables() []environmentVariable {
 			means: "the same as FOREMANKIT_SLOT, FOREMANKIT_CHANGED_FILES and FOREMANKIT_MAIN_ROOT, under the names the kit gave them before it was called Foreman, for the scripts of a repository written then. Any OPENSPEC_<name> set in the environment is read as FOREMANKIT_<name> when that one is not set", handed: true},
 		{names: "CYCLE_STAMP", means: "the name of a cycle, set by the kit for the process that runs it", read: true, handed: true},
 		{names: "SSH_AUTH_SOCK, GH_TOKEN, GITHUB_TOKEN, GITLAB_TOKEN, GIT_ASKPASS", means: "taken out of the environment of the agents a worker runs: what reaches a remote is the merger's to push", secret: true, removed: true},
+		{names: "TERM, COLORTERM, NO_COLOR", means: "how the banner of foreman-kit alone is drawn on a terminal: TERM=dumb leaves it out, NO_COLOR set draws it without color, COLORTERM=truecolor or 24bit gives it 24-bit color", read: true},
 		{names: "AGENT_STUB, FOREMANKIT_FORCE_BUILTIN, FOREMANKIT_SIM_STRICT",
 			means: "for tests and simulations: the script the agent named stub runs, 1 to check a change without the openspec CLI, and 1 to make foreman-kit sim fail on a known gap", read: true},
 	}

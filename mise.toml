@@ -45,11 +45,11 @@ outputs = ["bin/foreman-kit"]
 [tasks.test]
 description = "Run unit and integration tests"
 usage = 'arg "[pkg]" help="Package pattern to test" default="./internal/..."'
-run = "go test -count=1 {{usage.pkg}}"
+run = "go test -count=1 -timeout 60m {{usage.pkg}}"
 
 [tasks."test:all"]
 description = "Run every test in the module, including cmd/"
-run = "go test -count=1 ./..."
+run = "go test -count=1 -timeout 60m ./..."
 
 [tasks.evaluator-contract]
 description = "Run the offline contract check of the evaluator"

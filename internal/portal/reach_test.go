@@ -28,6 +28,7 @@ func TestEveryPageIsReachedFromDashboard(t *testing.T) {
 	// The pages nothing leads to, each with why.
 	unlinked := map[string]string{
 		"/":                        "the answer to an address that does not exist",
+		"/healthz":                 "a probe for programs, not a page",
 		"/visual/sessions/{stamp}": "the seed leaves no file of a visual QA session to open",
 		"/system/recommendations":  "the tab exists once a dispatcher has run for a day, which the seed has not",
 	}

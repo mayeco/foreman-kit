@@ -35,6 +35,7 @@ func (s *Server) router() *http.ServeMux {
 			mux.HandleFunc(method+" /api/", s.apiNoRoute)
 		}
 
+		s.healthRoutes(mux)
 		s.portalRoutes(mux)
 		s.mux = mux
 	})

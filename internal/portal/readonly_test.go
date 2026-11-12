@@ -70,6 +70,7 @@ func TestReadingAPageWritesNothing(t *testing.T) {
 	addresses := map[string][]string{
 		"/{$}":                                {"/"},
 		"/":                                   {"/no-such-page"},
+		"/healthz":                            {"/healthz"},
 		"/go":                                 {"/go?q=add-api", "/go?q=nothing"},
 		"/recent":                             {"/recent"},
 		"/inbox":                              {"/inbox", "/inbox?kind=blocked"},

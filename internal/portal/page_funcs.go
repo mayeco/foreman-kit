@@ -42,7 +42,15 @@ func pageFuncs() template.FuncMap {
 		"usd":           func(v float64) string { return fmt.Sprintf("$%.4f", v) },
 		"share":         shareText,
 		"codeSpans":     codeSpans,
+		"pathParts":     pathParts,
 	}
+}
+
+// pathParts splits a path at its last slash into the directory, with that slash, and the name, so a
+// page can dim the one and show the other.
+func pathParts(p string) [2]string {
+	i := strings.LastIndex(p, "/")
+	return [2]string{p[:i+1], p[i+1:]}
 }
 
 // stateBadge draws a recorded value as a badge: its words, the color of its tone and, with a tone,

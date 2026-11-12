@@ -99,7 +99,7 @@
 {{end}}
 </div>
 
-<div id="change-facts" data-live-region class="mb-5 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+<div id="change-facts" data-live-region class="mb-5 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
   <div>
     <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Depends on</h2>
     {{if $c.DependsOn}}<ul class="flex flex-col gap-1">{{range $c.DependsOn}}<li class="flex flex-wrap items-center gap-2">{{template "change_link" .ChangeName}}{{state "changes.state" .State}}</li>{{end}}</ul>{{else}}<p class="text-base-content/60">no other change</p>{{end}}
@@ -109,16 +109,16 @@
     {{if $c.NeededBy}}<ul class="flex flex-col gap-1">{{range $c.NeededBy}}<li class="flex flex-wrap items-center gap-2">{{template "change_link" .ChangeName}}{{state "changes.state" .State}}</li>{{end}}</ul>{{else}}<p class="text-base-content/60">no other change</p>{{end}}
   </div>
   <div>
-    <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Locks it declares</h2>
-    {{if $c.Locks}}<ul class="flex flex-wrap gap-1.5">{{range $c.Locks}}<li><code class="badge badge-sm badge-ghost font-mono">{{.}}</code></li>{{end}}</ul>{{else}}<p class="text-base-content/60">none</p>{{end}}
-  </div>
-  <div>
     <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Work so far</h2>
     <p class="tabular-nums">{{count $c.Runs "worker run" "worker runs"}} · {{count $c.Executions "execution" "executions"}} · {{count $c.Repairs "repair" "repairs"}}</p>
     <p><a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="/executions?change={{qenc $c.ChangeName}}">Its executions</a></p>
   </div>
+  <div class="col-span-full">
+    <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Locks it declares</h2>
+    {{if $c.Locks}}<ul class="grid gap-x-8 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">{{range $c.Locks}}{{$p := pathParts .}}<li class="flex min-w-0 items-start gap-2" title="{{.}}">{{iconc "lock" "mt-0.5 size-3.5 shrink-0 text-base-content/50"}}<code class="flex min-w-0 flex-col font-mono text-xs leading-5"><span class="break-all font-semibold">{{index $p 1}}</span>{{with index $p 0}}<span class="break-all text-base-content/60">{{.}}</span>{{end}}</code></li>{{end}}</ul>{{else}}<p class="text-base-content/60">none</p>{{end}}
+  </div>
   {{if or $c.Facts $c.Idle $c.Rebuild $c.Merge $c.Manifest}}
-  <div class="sm:col-span-2 xl:col-span-4">
+  <div class="col-span-full">
     <h2 class="mb-1 text-xs font-medium uppercase tracking-wider text-base-content/60">Right now</h2>
     <ul class="flex flex-col gap-1">
       {{with $c.Idle}}<li class="flex items-start gap-x-3">{{iconc "hourglass" "mt-0.5 size-4 shrink-0 text-warning"}}<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"><span>Its agent, {{.Engine}}, shows no activity.</span>{{template "idle_now" .}}<a class="link link-hover touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center" href="{{execHref .ExecID}}">its execution</a></div></li>{{end}}

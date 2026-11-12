@@ -67,7 +67,7 @@ func FastForwardCheckout(ctx context.Context, dir, remote, branch string, restor
 	if behind <= 0 {
 		return FastForwardResult{}
 	}
-	if cur, err := RunGit(ctx, dir, "symbolic-ref", "-q", "--short", "HEAD"); err != nil || strings.TrimSpace(cur) != branch {
+	if cur, ok := CurrentBranch(ctx, dir); !ok || cur != branch {
 		return FastForwardResult{Skipped: "not on " + branch}
 	}
 	if countRevs(ctx, dir, upstream+"..HEAD") > 0 {

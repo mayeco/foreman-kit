@@ -1721,8 +1721,8 @@ func checkApplicationProblems(root string) FileProblems {
 		if hasOrigin {
 			if _, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", "origin/"+base); err != nil {
 				curBranch := "<branch>"
-				if sym, err := gitx.RunGit(ctx, root, "symbolic-ref", "--short", "HEAD"); err == nil && strings.TrimSpace(sym) != "" {
-					curBranch = strings.TrimSpace(sym)
+				if sym, ok := gitx.CurrentBranch(ctx, root); ok {
+					curBranch = sym
 				}
 				if curBranch == base {
 					// The setting already names this branch: setting it again is no remedy.

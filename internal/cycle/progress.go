@@ -214,6 +214,9 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 	} else {
 		fmt.Fprintln(out, "CONFIG: OK")
 	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		fmt.Fprintf(out, "GIT: %v; nothing new starts until git is at least %s\n", err, gitx.MinVersion)
+	}
 
 	for _, lockName := range []string{"cycle", "dispatch", "visual_qa"} {
 		label := strings.ToUpper(strings.ReplaceAll(lockName, "_", " ")) + " LOCK"
@@ -416,19 +419,19 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 
 	fmt.Fprintln(out, "== Repositories")
 	if dirExists(filepath.Join(root, ".git")) || fileExists(filepath.Join(root, ".git")) {
-		br, _ := gitx.RunGit(ctx, root, "branch", "--show-current")
+		br, onBranch := gitx.CurrentBranch(ctx, root)
 		sha, _ := gitx.RunGit(ctx, root, "rev-parse", "--short", "HEAD")
 		behindNote := ""
 		// The main checkout is not moved by a merge: say when it lags origin, or its repos/ and
 		// backlog look older than what was integrated.
-		if b := strings.TrimSpace(br); b != "" {
-			if n, err := gitx.RunGit(ctx, root, "rev-list", "--count", "HEAD..origin/"+b); err == nil {
+		if onBranch {
+			if n, err := gitx.RunGit(ctx, root, "rev-list", "--count", "HEAD..origin/"+br); err == nil {
 				if behind, _ := strconv.Atoi(strings.TrimSpace(n)); behind > 0 {
-					behindNote = fmt.Sprintf(" behind origin/%s by %d (foreman-kit sync)", b, behind)
+					behindNote = fmt.Sprintf(" behind origin/%s by %d (foreman-kit sync)", br, behind)
 				}
 			}
 		}
-		fmt.Fprintf(out, "  %-22s %-24s %s%s\n", "root", strings.TrimSpace(br), strings.TrimSpace(sha), behindNote)
+		fmt.Fprintf(out, "  %-22s %-24s %s%s\n", "root", br, strings.TrimSpace(sha), behindNote)
 		if repo, err := gitx.Open(root); err == nil {
 			children, _ := repo.ChildPaths()
 			for _, p := range children {
@@ -437,14 +440,14 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 					fmt.Fprintf(out, "  %-22s not initialized\n", p)
 					continue
 				}
-				cbr, _ := gitx.RunGit(ctx, d, "branch", "--show-current")
+				cbr, _ := gitx.CurrentBranch(ctx, d)
 				csha, _ := gitx.RunGit(ctx, d, "rev-parse", "--short", "HEAD")
 				dirtyOut, _ := gitx.StatusPorcelain(ctx, d, true)
 				dirtyLines := 0
 				if strings.TrimSpace(dirtyOut) != "" {
 					dirtyLines = len(strings.Split(strings.TrimRight(dirtyOut, "\n"), "\n"))
 				}
-				fmt.Fprintf(out, "  %-22s %-24s %s dirty=%d\n", p, strings.TrimSpace(cbr), strings.TrimSpace(csha), dirtyLines)
+				fmt.Fprintf(out, "  %-22s %-24s %s dirty=%d\n", p, cbr, strings.TrimSpace(csha), dirtyLines)
 			}
 			baseRef := "origin/" + ResolveBaseBranch(root)
 			if _, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", baseRef); err != nil {
@@ -1274,9 +1277,8 @@ func syncRoot(ctx context.Context, root string, out io.Writer, flag func(string)
 		fmt.Fprintln(out, "  root: local changes present; skipping pull")
 		flag("root dirty")
 	} else {
-		brOut, err := gitx.RunGit(apply, root, "symbolic-ref", "-q", "--short", "HEAD")
-		branch := strings.TrimSpace(brOut)
-		if err != nil || branch == "" {
+		branch, ok := gitx.CurrentBranch(apply, root)
+		if !ok {
 			branch = "detached"
 		}
 		// Count before the fast-forward: "up to date" only when there was nothing to pull.
@@ -1351,9 +1353,8 @@ func SyncRepos(ctx context.Context, root string, st *store.Store, publish bool, 
 			fmt.Fprintf(out, "  %s: SKIPPED (uncommitted changes)\n", p)
 			continue
 		}
-		brOut, _ := gitx.RunGit(ctx, childDir, "symbolic-ref", "-q", "--short", "HEAD")
-		cBranch := strings.TrimSpace(brOut)
-		if cBranch == "" {
+		cBranch, ok := gitx.CurrentBranch(ctx, childDir)
+		if !ok {
 			if _, err := gitx.RunGit(ctx, root, "submodule", "update", "--init", "--quiet", "--", p); err == nil {
 				fmt.Fprintf(out, "  %s: at recorded pointer\n", p)
 			} else {

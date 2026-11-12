@@ -625,11 +625,9 @@ func Init(ctx context.Context, target string, opts KitOptions, out io.Writer) er
 	// The base branch has no value of the kit's own: a checkout that is on a branch names it. An
 	// application installed before its repository exists keeps the one the seed writes, to be set.
 	if slices.Contains(seeded, settings.BaseBranch.FilePath()) {
-		if branch, err := gitx.RunGit(ctx, target, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
-			if branch = strings.TrimSpace(branch); branch != "" && settings.BranchRe.MatchString(branch) {
-				if err := config.Set(target, string(settings.BaseBranch), branch, false, io.Discard); err != nil {
-					return err
-				}
+		if branch, ok := gitx.CurrentBranch(ctx, target); ok && settings.BranchRe.MatchString(branch) {
+			if err := config.Set(target, string(settings.BaseBranch), branch, false, io.Discard); err != nil {
+				return err
 			}
 		}
 	}
@@ -847,8 +845,8 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 	// what the application holds, with nothing written, and leaves it where a person can mend it.
 	cameFrom := ""
 	if isGit {
-		if name, err := gitx.RunGit(ctx, target, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
-			cameFrom = strings.TrimSpace(name)
+		if name, ok := gitx.CurrentBranch(ctx, target); ok {
+			cameFrom = name
 		}
 	}
 	if isGit {
@@ -1100,7 +1098,7 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 			// A commit made on no branch is left behind when foreman-kit sync returns the repository
 			// to the commit the umbrella records, and the file with it: it is made on the base branch.
 			childDir := filepath.Join(target, filepath.FromSlash(rel))
-			if branch, err := gitx.RunGit(ctx, childDir, "symbolic-ref", "-q", "--short", "HEAD"); isGitRepoWithHead(ctx, childDir) && (err != nil || strings.TrimSpace(branch) == "") {
+			if _, ok := gitx.CurrentBranch(ctx, childDir); isGitRepoWithHead(ctx, childDir) && !ok {
 				fmt.Fprintf(out, "  git -C %s switch %s    (it is on no branch: foreman-kit sync would leave a commit made there behind)\n", rel, base)
 			}
 			fmt.Fprintf(out, "  git -C %s commit -m \"chore: %s with the keys of foreman-kit v%s\" %s && git -C %s push origin HEAD:%s\n",
@@ -1724,8 +1722,8 @@ func SetupRepo(root, name string, force bool, out io.Writer) error {
 	if repo, err := gitx.Open(root); err == nil {
 		branch = repo.ChildBaseBranch(relPath)
 	}
-	if brOut, err := gitx.RunGit(context.Background(), dir, "symbolic-ref", "--short", "HEAD"); err == nil && strings.TrimSpace(brOut) != "" {
-		branch = strings.TrimSpace(brOut)
+	if cur, ok := gitx.CurrentBranch(context.Background(), dir); ok {
+		branch = cur
 	}
 
 	envScript := ""

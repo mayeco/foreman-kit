@@ -21,6 +21,7 @@ import (
 	"github.com/mayeco/foreman-kit/internal/assets"
 	"github.com/mayeco/foreman-kit/internal/config"
 	"github.com/mayeco/foreman-kit/internal/evaluator"
+	"github.com/mayeco/foreman-kit/internal/gitx"
 	"github.com/mayeco/foreman-kit/internal/memory"
 	"github.com/mayeco/foreman-kit/internal/settings"
 	"github.com/mayeco/foreman-kit/internal/store"
@@ -349,7 +350,25 @@ func RunPreflight(ctx context.Context, opts PreflightOptions) (*PreflightResult,
 	// 1. Toolchain
 	fmt.Fprintf(stdout, "== Toolchain (%s, %s %s)\n", time.Now().UTC().Format(time.RFC3339), runtime.GOOS, runtime.GOARCH)
 	missingTool := false
+	gitProblem := ""
 	for _, tool := range []string{"git", "openspec", memory.Binary} {
+		if tool == "git" {
+			ver, path, err := gitx.Version(ctx)
+			switch {
+			case path == "":
+				fmt.Fprintf(stdout, "  git: NOT FOUND\n")
+				missingTool = true
+			case err != nil:
+				fmt.Fprintf(stdout, "  git: unreadable version (minimum %s) (%s)\n", gitx.MinVersion, path)
+				gitProblem = fmt.Sprintf("git version at %s cannot be read (minimum %s)", path, gitx.MinVersion)
+			default:
+				fmt.Fprintf(stdout, "  git: %s (minimum %s) (%s)\n", ver, gitx.MinVersion, path)
+				if !gitx.VersionAtLeast(ver, gitx.MinVersion) {
+					gitProblem = fmt.Sprintf("git %s at %s is older than the minimum %s", ver, path, gitx.MinVersion)
+				}
+			}
+			continue
+		}
 		if path, err := exec.LookPath(tool); err == nil {
 			// agent-memory says its version with a command of its own.
 			versionArg := "--version"
@@ -597,6 +616,9 @@ func RunPreflight(ctx context.Context, opts PreflightOptions) (*PreflightResult,
 
 	if missingTool {
 		return fail("preflight: FAIL (toolchain incomplete)")
+	}
+	if gitProblem != "" {
+		return fail(fmt.Sprintf("preflight: FAIL (%s)", gitProblem))
 	}
 	if !kitOK {
 		return fail("preflight: FAIL (kit differs from .foreman-kit/kit.lock: upgrade or reinstall it)")

@@ -737,6 +737,10 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	if why := d.cfg().waits(); why != "" {
 		return errors.New("dispatcher: " + why)
 	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		d.logf("dispatcher: %v", err)
+		return fmt.Errorf("dispatcher: %w", err)
+	}
 
 	d.loadPersistedState(ctx)
 	d.stateMu.Lock()
@@ -1086,6 +1090,10 @@ func (d *Dispatcher) Serve(ctx context.Context) error {
 	pid := os.Getpid()
 	if why := d.cfg().waits(); why != "" {
 		return errors.New("dispatcher: " + why)
+	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		d.logf("dispatcher: %v", err)
+		return fmt.Errorf("dispatcher: %w", err)
 	}
 	d.loadPersistedState(ctx)
 	d.stateMu.Lock()
@@ -2499,7 +2507,7 @@ func (d *Dispatcher) provisionWorktree(ctx context.Context, wt, change, branch s
 
 	if dirExists(wt) && !gitx.IsWorktreeRoot(ctx, wt) {
 		// A worker worktree may hold work: repair a moved umbrella's stale gitfile, but never delete it.
-		_, _ = gitx.RunGit(ctx, d.root, "worktree", "repair", wt)
+		gitx.RepairWorktree(ctx, d.root, wt)
 		if !gitx.IsWorktreeRoot(ctx, wt) {
 			return NewBlockedError("orchestrator_error", fmt.Sprintf(
 				"%s exists but is not a git worktree of %s (moved umbrella or broken .git); run `git worktree repair %s` or remove it",
@@ -2652,8 +2660,8 @@ func (d *Dispatcher) keepLeftovers(ctx context.Context, wt, change, branch strin
 			if strings.TrimSpace(stOut) == "" {
 				continue
 			}
-			curBranch, _ := gitx.RunGit(ctx, childDir, "branch", "--show-current")
-			if strings.TrimSpace(curBranch) != branch {
+			curBranch, ok := gitx.CurrentBranch(ctx, childDir)
+			if !ok || curBranch != branch {
 				continue
 			}
 			if err := d.commitChild(ctx, childDir, cp, message); err != nil {
@@ -3015,7 +3023,7 @@ func (d *Dispatcher) refreshPhase(ctx context.Context, item BacklogItem, wt, bra
 			}
 		}
 		if branchErr == nil {
-			if _, err := d.childGit(ctx, childDir, cp, "switch", "--quiet", branch); err != nil {
+			if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", branch); err != nil {
 				return "", err
 			}
 			if _, err := gitx.RunGit(ctx, childDir, "merge-base", "--is-ancestor", target, "HEAD"); err == nil {
@@ -3034,10 +3042,10 @@ func (d *Dispatcher) refreshPhase(ctx context.Context, item BacklogItem, wt, bra
 			}
 			rebuilt = append(rebuilt, msg)
 		} else {
-			if _, err := d.childGit(ctx, childDir, cp, "switch", "--quiet", "--detach", target); err != nil {
+			if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", "--detach", target); err != nil {
 				return "", err
 			}
-			if _, err := d.childGit(ctx, childDir, cp, "switch", "--quiet", "-c", branch); err != nil {
+			if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", "-b", branch); err != nil {
 				return "", err
 			}
 		}
@@ -3095,13 +3103,13 @@ func (d *Dispatcher) rebuildChild(ctx context.Context, change, cp, childDir, bra
 	if _, err := d.childGit(ctx, childDir, cp, "branch", "-f", kept, branch); err != nil {
 		return "", err
 	}
-	if _, err := d.childGit(ctx, childDir, cp, "switch", "--quiet", "--detach", target); err != nil {
+	if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", "--detach", target); err != nil {
 		return "", err
 	}
 	if _, err := d.childGit(ctx, childDir, cp, "branch", "-f", branch, target); err != nil {
 		return "", err
 	}
-	if _, err := d.childGit(ctx, childDir, cp, "switch", "--quiet", branch); err != nil {
+	if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", branch); err != nil {
 		return "", err
 	}
 
@@ -3350,7 +3358,7 @@ func (d *Dispatcher) unmoveUntouchedChildren(ctx context.Context, wt, change, br
 		if err != nil || strings.TrimSpace(head) != heads[0] {
 			continue
 		}
-		if _, err := d.childGit(ctx, childDir, cp, "switch", "--quiet", "-C", branch, heads[1]); err != nil {
+		if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", "-B", branch, heads[1]); err != nil {
 			return err
 		}
 		d.logf("dispatcher: %s: %s keeps its gitlink %s (no commit there; a change in it records %s again)", change, cp, shortSHA(heads[1]), shortSHA(heads[0]))
@@ -3406,8 +3414,7 @@ func (d *Dispatcher) verifyBuild(ctx context.Context, wt, change, branch string,
 
 	var offBranch []string
 	for _, c := range children {
-		cur, _ := gitx.RunGit(ctx, filepath.Join(wt, filepath.FromSlash(c)), "branch", "--show-current")
-		if strings.TrimSpace(cur) != branch {
+		if cur, ok := gitx.CurrentBranch(ctx, filepath.Join(wt, filepath.FromSlash(c))); !ok || cur != branch {
 			offBranch = append(offBranch, c)
 		}
 	}

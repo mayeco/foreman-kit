@@ -555,6 +555,10 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 		fmt.Fprintf(out, "cycle: %v\n", err)
 		return err
 	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		fmt.Fprintf(out, "cycle: %v\n", err)
+		return err
+	}
 
 	stamp := opts.Stamp
 	if stamp == "" {

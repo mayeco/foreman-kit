@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -661,5 +662,98 @@ func TestEngineHealthCircuitBreakerInSpreadArrange(t *testing.T) {
 	}
 	if len(arranged) != 3 || arranged[0] != "hermes" {
 		t.Fatalf("expected healthy hermes to be chosen first despite in_use=1, got %v", arranged)
+	}
+}
+
+func TestPreflightGitVersionCheck(t *testing.T) {
+	root, st := setupProcTestWorkspace(t)
+	ctx := context.Background()
+
+	if _, err := memory.Init(ctx, root, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	settingstest.Give(t, settings.EvaluatorEnabled, "false")
+
+	binDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"openspec", "claude", "hermes"} {
+		script := "#!/usr/bin/env bash\necho '" + name + " 1.0.0 pong'\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakeGit := filepath.Join(binDir, "git")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cases := []struct {
+		name     string
+		verLine  string
+		wantOK   bool
+		wantLine string
+		wantFail string
+	}{
+		{
+			name:     "2.16.6 below minimum",
+			verLine:  "git version 2.16.6",
+			wantOK:   false,
+			wantLine: fmt.Sprintf("  git: 2.16.6 (minimum 2.17.0) (%s)", fakeGit),
+			wantFail: fmt.Sprintf("preflight: FAIL (git 2.16.6 at %s is older than the minimum 2.17.0)", fakeGit),
+		},
+		{
+			name:     "2.17.0 minimum",
+			verLine:  "git version 2.17.0",
+			wantOK:   true,
+			wantLine: fmt.Sprintf("  git: 2.17.0 (minimum 2.17.0) (%s)", fakeGit),
+		},
+		{
+			name:     "Apple vendor string",
+			verLine:  "git version 2.39.5 (Apple Git-154)",
+			wantOK:   true,
+			wantLine: fmt.Sprintf("  git: 2.39.5 (minimum 2.17.0) (%s)", fakeGit),
+		},
+		{
+			name:     "unreadable version",
+			verLine:  "git version custom-unreadable",
+			wantOK:   false,
+			wantLine: fmt.Sprintf("  git: unreadable version (minimum 2.17.0) (%s)", fakeGit),
+			wantFail: fmt.Sprintf("preflight: FAIL (git version at %s cannot be read (minimum 2.17.0))", fakeGit),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			script := "#!/bin/sh\necho '" + tc.verLine + "'\nexit 0\n"
+			if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			var outBuf, errBuf bytes.Buffer
+			res, err := RunPreflight(ctx, PreflightOptions{
+				Root:   root,
+				Store:  st,
+				Stdout: &outBuf,
+				Stderr: &errBuf,
+			})
+			if err != nil {
+				t.Fatalf("RunPreflight error: %v", err)
+			}
+			out := outBuf.String()
+			if !strings.Contains(out, tc.wantLine) {
+				t.Fatalf("expected output to contain %q, got:\n%s", tc.wantLine, out)
+			}
+			if tc.wantOK {
+				if !res.OK || res.ExitCode != 0 {
+					t.Fatalf("expected preflight OK, got res=%+v\nout:\n%s", res, out)
+				}
+			} else {
+				if res.OK || res.ExitCode == 0 {
+					t.Fatalf("expected preflight to fail, got res=%+v\nout:\n%s", res, out)
+				}
+				if !strings.Contains(out, tc.wantFail) {
+					t.Fatalf("expected failure line %q, got:\n%s", tc.wantFail, out)
+				}
+			}
+		})
 	}
 }

@@ -192,6 +192,10 @@ func (m *Merger) Run(ctx context.Context) error {
 	if why := m.settings.MergerWaits(); why != "" {
 		return errors.New("merger: " + why)
 	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		m.logf("merger: %v", err)
+		return fmt.Errorf("merger: %w", err)
+	}
 	leaseTTL := m.settings.LocksStaleAfter
 	_, err := m.store.AcquireLock(ctx, "merger", store.LockOptions{
 		OwnerType: "merger",
@@ -262,6 +266,10 @@ func (m *Merger) Serve(ctx context.Context) error {
 	pid := os.Getpid()
 	if why := m.settings.MergerWaits(); why != "" {
 		return errors.New("merger: " + why)
+	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		m.logf("merger: %v", err)
+		return fmt.Errorf("merger: %w", err)
 	}
 	ttl := m.settings.LocksStaleAfter
 	if _, err := m.store.AcquireLock(ctx, "merger", store.LockOptions{
@@ -1269,7 +1277,7 @@ func (m *Merger) prepareIntegrationWorktree(ctx context.Context, baseRef string)
 		// A moved or remounted umbrella leaves a gitfile pointing at a missing admin dir, and a directory
 		// without .git would make the forced checkout and reset below act on the main checkout (discarding
 		// the operator's uncommitted work): repair it, else recreate it.
-		_, _ = gitx.RunGit(ctx, m.root, "worktree", "repair", wt)
+		gitx.RepairWorktree(ctx, m.root, wt)
 		if !gitx.IsWorktreeRoot(ctx, wt) {
 			if err := rootRepo.RemoveWorktree(ctx, wt); err != nil {
 				return err

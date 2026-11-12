@@ -286,6 +286,13 @@ func TestAppRootAndMainRootInWorktreeWithEnvAppRoot(t *testing.T) {
 	if got := AppRoot(""); got != wt {
 		t.Fatalf("AppRoot(\"\") from worktree cwd = %q, want %q", got, wt)
 	}
+
+	// When FOREMANKIT_APP_ROOT points to a different application, an unrelated outer worktree cwd must not override it.
+	otherApp := filepath.Join(tmp, "other-app")
+	t.Setenv("FOREMANKIT_APP_ROOT", otherApp)
+	if got := AppRoot(""); got != otherApp {
+		t.Fatalf("AppRoot(\"\") with FOREMANKIT_APP_ROOT=%q from unrelated worktree cwd = %q, want %q", otherApp, got, otherApp)
+	}
 }
 
 func TestWorkspaceIDAndResolveDBPathSymlinkResolution(t *testing.T) {

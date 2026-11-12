@@ -178,9 +178,6 @@ func worktreeWithin(startDir, envRoot string) string {
 			if samePath(gp, umbrella) {
 				return filepath.Join(umbrella, ".worktrees", filepath.Base(cur))
 			}
-			if hasUmbrellaMarker(gp) {
-				return cur
-			}
 		}
 		cur = parent
 	}

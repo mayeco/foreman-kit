@@ -24,6 +24,7 @@ import (
 	"github.com/mayeco/foreman-kit/internal/assets"
 	"github.com/mayeco/foreman-kit/internal/evaluator"
 	"github.com/mayeco/foreman-kit/internal/gitx"
+	"github.com/mayeco/foreman-kit/internal/history"
 	"github.com/mayeco/foreman-kit/internal/memory"
 	"github.com/mayeco/foreman-kit/internal/settings"
 	"github.com/mayeco/foreman-kit/internal/store"
@@ -33,7 +34,7 @@ const (
 	ProposalsFile   = ".foreman-kit/agent_proposals.json"
 	BacklogFile     = ".foreman-kit/agent_backlog.json"
 	HistoryFile     = ".foreman-kit/agent_history.json"
-	HistoryMaxLines = 1000
+	HistoryMaxLines = history.MaxLines
 	CycleFile       = ".foreman-kit/cycle.yaml"
 	PromptsDir      = ".foreman-kit/prompts"
 	RulesTemplate   = ".foreman-kit/templates/authoring_rules.md"
@@ -401,9 +402,9 @@ func ReadAllHistory(root string) ([]map[string]any, error) {
 }
 
 // WriteHistoryWithRotation writes items to .foreman-kit/agent_history.json.
-// Whenever the pretty-printed file exceeds HistoryMaxLines (1000 lines), it rotates older items
-// logrotate-style (agent_history.1.json -> agent_history.2.json, etc.) with each rotated file
-// formatted minified (one change per line).
+// Whenever the pretty-printed file exceeds HistoryMaxLines (1000 lines), it moves older items into
+// the rotated files (history.Append): minified, one change per line, agent_history.1.json filled up
+// to HistoryMaxLines lines before the files shift (agent_history.1.json -> agent_history.2.json, ...).
 func WriteHistoryWithRotation(root string, items []map[string]any) ([]map[string]any, error) {
 	if items == nil {
 		items = []map[string]any{}
@@ -436,26 +437,9 @@ func WriteHistoryWithRotation(root string, items []map[string]any) ([]map[string
 		toRotate := items[:split]
 		items = items[split:]
 
-		// Shift existing agent_history.<N>.json -> agent_history.<N+1>.json in descending order
-		existing := RotatedHistoryRelPaths(root)
-		for i := len(existing) - 1; i >= 0; i-- {
-			m := RotatedHistoryFileRe.FindStringSubmatch(existing[i])
-			if len(m) != 2 {
-				continue
-			}
-			n, _ := strconv.Atoi(m[1])
-			src := filepath.Join(root, filepath.FromSlash(existing[i]))
-			dst := filepath.Join(root, ".foreman-kit", fmt.Sprintf("agent_history.%d.json", n+1))
-			_ = os.Rename(src, dst)
-		}
-
-		// Write toRotate minified (one change per line) to .foreman-kit/agent_history.1.json
-		minBytes, err := FormatMinifiedJSONListOnePerLine(toRotate)
-		if err != nil {
-			return nil, err
-		}
-		rot1Path := filepath.Join(root, ".foreman-kit", "agent_history.1.json")
-		if err := writeTextAtomic(rot1Path, string(minBytes)); err != nil {
+		// The older changes fill agent_history.1.json up to HistoryMaxLines lines before the rotated
+		// files shift and a new one opens.
+		if err := history.Append(root, toRotate); err != nil {
 			return nil, err
 		}
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/mayeco/foreman-kit/internal/assets"
 	"github.com/mayeco/foreman-kit/internal/config"
 	"github.com/mayeco/foreman-kit/internal/gitx"
+	"github.com/mayeco/foreman-kit/internal/history"
 	"github.com/mayeco/foreman-kit/internal/memory"
 	"github.com/mayeco/foreman-kit/internal/settings"
 	"github.com/mayeco/foreman-kit/internal/store"
@@ -821,7 +822,7 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 
 	// Names this version no longer reads (see renameEvaluator and config.MigrateConfig) are rewritten
 	// even at the same version.
-	renamePending := evaluatorRenamePending(target) || early.Pending() || config.RepoConfigsNeedRewrite(target) || memoryMigrationPending(target) || len(movedLayout) > 0
+	renamePending := evaluatorRenamePending(target) || history.NeedsCompaction(target) || early.Pending() || config.RepoConfigsNeedRewrite(target) || memoryMigrationPending(target) || len(movedLayout) > 0
 
 	if oldLock.Version == ver && len(edited) == 0 && !reselected && len(dropped) == 0 && !seedChanged && !kitChanged && !renamePending {
 		fmt.Fprintf(out, "kit: already at v%s; nothing to do\n", ver)
@@ -897,6 +898,15 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 	for _, note := range migration.Notes {
 		fmt.Fprintf(&renameNotes, "  %s\n", note)
 	}
+	// The rotated history files an older kit left, one small file per rotation, are regrouped so that
+	// each holds history.MaxLines lines.
+	compacted, err := history.Compact(target)
+	if err != nil {
+		fmt.Fprintf(&renameNotes, "  the rotated history was left as it was: %v\n", err)
+	} else if len(compacted) > 0 {
+		fmt.Fprintf(&renameNotes, "  the rotated history was regrouped into files of %d lines\n", history.MaxLines)
+	}
+	compactedHistory := len(compacted) > 0
 	// The repo.config.yaml of each repository checked out here is rewritten the same way. A
 	// repository is a git repository of its own: its file is written, and committing it there is for
 	// a person, who is told how once the upgrade is done.
@@ -1062,6 +1072,10 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 		if len(stagePaths) > 0 {
 			addArgs := append([]string{"add", "-A", "--"}, stagePaths...)
 			_, _ = gitx.RunGit(ctx, target, addArgs...)
+		}
+		if compactedHistory {
+			// The regrouped history removes files: a glob pathspec stages their removal too.
+			_, _ = gitx.RunGit(ctx, target, "add", "-A", "--", ":(glob).foreman-kit/agent_history.*.json")
 		}
 		msg := fmt.Sprintf("chore(kit): upgrade the OpenSpec kit to v%s", ver)
 		if sameVersion && reselected {

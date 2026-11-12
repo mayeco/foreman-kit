@@ -811,10 +811,18 @@ func TestAgentHistoryLogrotateMinifiedOnePerLine(t *testing.T) {
 		t.Fatal("expected non-empty active2")
 	}
 
-	// Verify logrotate shift: agent_history.2.json and agent_history.1.json both exist
+	// The second rotation fills agent_history.1.json instead of opening a second small file: a
+	// rotated file only shifts once it holds HistoryMaxLines lines.
 	rotPaths := RotatedHistoryRelPaths(root)
-	if len(rotPaths) != 2 || rotPaths[0] != ".foreman-kit/agent_history.1.json" || rotPaths[1] != ".foreman-kit/agent_history.2.json" {
-		t.Fatalf("expected [.foreman-kit/agent_history.1.json .foreman-kit/agent_history.2.json], got %v", rotPaths)
+	if len(rotPaths) != 1 || rotPaths[0] != ".foreman-kit/agent_history.1.json" {
+		t.Fatalf("expected [.foreman-kit/agent_history.1.json], got %v", rotPaths)
+	}
+	rot1Again, err := os.ReadFile(filepath.Join(root, ".foreman-kit", "agent_history.1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := bytes.Count(rot1Again, []byte("\n")), 350-len(active2)+2; got != want {
+		t.Fatalf("expected %d lines in agent_history.1.json after the second rotation, got %d", want, got)
 	}
 
 	// Verify ReadAllHistory and SQLite SyncJSONToSQLite read all 350 changes across active + rotated files

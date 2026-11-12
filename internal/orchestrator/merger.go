@@ -20,6 +20,7 @@ import (
 
 	"github.com/mayeco/foreman-kit/internal/evaluator"
 	"github.com/mayeco/foreman-kit/internal/gitx"
+	"github.com/mayeco/foreman-kit/internal/history"
 	"github.com/mayeco/foreman-kit/internal/llm"
 	"github.com/mayeco/foreman-kit/internal/settings"
 	"github.com/mayeco/foreman-kit/internal/store"
@@ -1576,9 +1577,8 @@ func ArchiveBacklogInDir(dir string, item map[string]any, at string) error {
 }
 
 func writeHistoryWithRotationInDir(dir string, items []map[string]any) error {
-	const historyMaxLines = 1000
+	const historyMaxLines = history.MaxLines
 	historyPath := filepath.Join(dir, ".foreman-kit", "agent_history.json")
-	rotRe := regexp.MustCompile(`^agent_history\.(\d+)\.json$`)
 
 	for len(items) > 1 {
 		b, err := json.MarshalIndent(items, "", "  ")
@@ -1602,40 +1602,7 @@ func writeHistoryWithRotationInDir(dir string, items []map[string]any) error {
 		toRotate := items[:split]
 		items = items[split:]
 
-		// Shift existing agent_history.<N>.json -> agent_history.<N+1>.json
-		if entries, err := os.ReadDir(filepath.Join(dir, ".foreman-kit")); err == nil {
-			var nums []int
-			for _, e := range entries {
-				if m := rotRe.FindStringSubmatch(e.Name()); len(m) == 2 {
-					if n, err := strconv.Atoi(m[1]); err == nil && n >= 1 {
-						nums = append(nums, n)
-					}
-				}
-			}
-			sort.Ints(nums)
-			for i := len(nums) - 1; i >= 0; i-- {
-				n := nums[i]
-				src := filepath.Join(dir, ".foreman-kit", fmt.Sprintf("agent_history.%d.json", n))
-				dst := filepath.Join(dir, ".foreman-kit", fmt.Sprintf("agent_history.%d.json", n+1))
-				_ = os.Rename(src, dst)
-			}
-		}
-
-		var buf bytes.Buffer
-		buf.WriteString("[\n")
-		for i, it := range toRotate {
-			line, err := json.Marshal(it)
-			if err != nil {
-				return err
-			}
-			buf.Write(line)
-			if i < len(toRotate)-1 {
-				buf.WriteByte(',')
-			}
-			buf.WriteByte('\n')
-		}
-		buf.WriteString("]\n")
-		if err := writeFileAtomic(filepath.Join(dir, ".foreman-kit", "agent_history.1.json"), buf.Bytes()); err != nil {
+		if err := history.Append(dir, toRotate); err != nil {
 			return err
 		}
 	}

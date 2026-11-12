@@ -336,16 +336,20 @@ func VisualQARequest(ctx context.Context, root string, st *store.Store, what, ch
 	if out == nil {
 		out = io.Discard
 	}
+	what = strings.TrimSpace(what)
+	changeName = strings.TrimSpace(changeName)
+	if changeName != "" && !ChangeNameRe.MatchString(changeName) {
+		return nil, fmt.Errorf("%q is not the name of a change", changeName)
+	}
 	vcfg := GetVisualQASettings(root)
 	if !vcfg.Enabled {
 		return nil, fmt.Errorf("visual QA is disabled (%s)", settings.VisualQAEnabled.Where())
 	}
-	what = strings.TrimSpace(what)
 	if what == "" {
 		return nil, fmt.Errorf("say what to check")
 	}
 	item := store.VisualQAItem{
-		ChangeName: strings.TrimSpace(changeName),
+		ChangeName: changeName,
 		What:       what,
 		Status:     "pending",
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339),

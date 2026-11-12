@@ -278,6 +278,10 @@ func (x *executions) HasWorktree(change string) bool {
 
 // ---- starting ---------------------------------------------------------------------------------
 
+// maxPromptBytes is the limit in bytes of an agent prompt sent from the portal, measured after
+// surrounding white space is trimmed.
+const maxPromptBytes = 256 << 10
+
 // AgentRun is a prompt to run an agent on.
 type AgentRun struct {
 	// Engine is an agent the kit knows, "auto" for the agents of this application as it picks among
@@ -293,6 +297,13 @@ type AgentRun struct {
 
 // StartAgent starts an agent on a prompt, in the background, and returns the execution it created.
 func (x *executions) StartAgent(ctx context.Context, in AgentRun) (store.Execution, error) {
+	if len(strings.TrimSpace(in.Prompt)) > maxPromptBytes {
+		return store.Execution{}, errInvalid("the prompt is longer than %d bytes", maxPromptBytes)
+	}
+	return x.startAgent(ctx, in)
+}
+
+func (x *executions) startAgent(ctx context.Context, in AgentRun) (store.Execution, error) {
 	prompt := strings.TrimSpace(in.Prompt)
 	if prompt == "" {
 		return store.Execution{}, errInvalid("the prompt is empty")
@@ -518,6 +529,9 @@ func (x *executions) Continue(ctx context.Context, id string, in Continuation) (
 	if follow == "" {
 		return store.Execution{}, errInvalid("the follow-up is empty")
 	}
+	if len(follow) > maxPromptBytes {
+		return store.Execution{}, errInvalid("the follow-up is longer than %d bytes", maxPromptBytes)
+	}
 	text := follow
 	if in.WithContext {
 		out, err := x.store.ReadFullLog(ctx, id)
@@ -534,7 +548,7 @@ func (x *executions) Continue(ctx context.Context, id string, in Continuation) (
 	if engine == "" {
 		engine = prev.Agent
 	}
-	return x.StartAgent(ctx, AgentRun{
+	return x.startAgent(ctx, AgentRun{
 		Engine: engine, Prompt: text, Change: x.changeOfWorkdir(prev.Workdir),
 		parent: id, relation: "continue", summary: follow,
 	})

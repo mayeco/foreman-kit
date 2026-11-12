@@ -621,3 +621,118 @@ func TestAutoRunsOnTheAgentsOfTheApplication(t *testing.T) {
 	default:
 	}
 }
+
+func TestPromptLengthLimit(t *testing.T) {
+	srv, st, root := setupTestPortal(t)
+	ctx := context.Background()
+	called := 0
+	kitOf(srv).agent = func(_ context.Context, _, _, _ string) (string, int, error) {
+		called++
+		return "ok", 0, nil
+	}
+	runsCount := func() int {
+		t.Helper()
+		runs, err := st.ListExecutions(ctx, "portal_run", "", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(runs)
+	}
+	limitText := strconv.Itoa(maxPromptBytes)
+
+	// Scenario: Prompt over the limit is refused.
+	for _, size := range []int{300000, maxPromptBytes + 1} {
+		code, body, raw, _ := doReq(t, srv, http.MethodPost, "/api/executions", map[string]any{
+			"engine": "claude",
+			"prompt": strings.Repeat("x", size),
+		})
+		if c, msg := errorOf(body); code != http.StatusBadRequest || c != "invalid_input" || !strings.Contains(msg, limitText) {
+			t.Fatalf("POST /api/executions (%d bytes) = %d %s; want 400 invalid_input naming %s", size, code, raw, limitText)
+		}
+		if got := runsCount(); got != 0 {
+			t.Fatalf("after refused %d-byte prompt, %d runs in store, want 0", size, got)
+		}
+		if called != 0 {
+			t.Fatalf("after refused %d-byte prompt, agent was called %d times, want 0", size, called)
+		}
+	}
+
+	// Scenario: Prompt at the limit is accepted.
+	atLimit := strings.Repeat("a", maxPromptBytes)
+	code, body, raw, _ := doReq(t, srv, http.MethodPost, "/api/executions", map[string]any{
+		"engine": "claude",
+		"prompt": atLimit,
+	})
+	limitID, ex := startedOf(t, code, body, raw)
+	if asStr(ex["prompt_text"]) != atLimit {
+		t.Fatalf("execution prompt_text length = %d, want %d", len(asStr(ex["prompt_text"])), len(atLimit))
+	}
+	waitExecution(t, st, limitID)
+	waitWork(t, srv.exec, limitID)
+	if got, err := st.GetExecution(ctx, limitID); err != nil || got == nil || got.PromptText != atLimit {
+		t.Fatalf("stored execution prompt length = %d (err %v), want %d", len(got.PromptText), err, len(atLimit))
+	}
+
+	// Scenario: White space outside the limit does not count.
+	padded := strings.Repeat(" ", 50) + atLimit + strings.Repeat("\n", 50)
+	code, body, raw, _ = doReq(t, srv, http.MethodPost, "/api/executions", map[string]any{
+		"engine": "claude",
+		"prompt": padded,
+	})
+	paddedID, ex := startedOf(t, code, body, raw)
+	if asStr(ex["prompt_text"]) != atLimit {
+		t.Fatalf("padded execution prompt_text length = %d, want %d", len(asStr(ex["prompt_text"])), len(atLimit))
+	}
+	waitExecution(t, st, paddedID)
+	waitWork(t, srv.exec, paddedID)
+
+	// Scenario: Oversized follow-up is refused; at-limit follow-up with context is accepted.
+	beforeCont := runsCount()
+	callsBeforeCont := called
+	code, body, raw, _ = doReq(t, srv, http.MethodPost, "/api/executions/"+limitID+"/continue", map[string]any{
+		"prompt": strings.Repeat("f", maxPromptBytes+1),
+	})
+	if c, msg := errorOf(body); code != http.StatusBadRequest || c != "invalid_input" || !strings.Contains(msg, limitText) {
+		t.Fatalf("POST /api/executions/%s/continue (oversized) = %d %s; want 400 invalid_input naming %s", limitID, code, raw, limitText)
+	}
+	if got := runsCount(); got != beforeCont {
+		t.Fatalf("oversized follow-up wrote a row: runs = %d, want %d", got, beforeCont)
+	}
+	if called != callsBeforeCont {
+		t.Fatalf("oversized follow-up started agent: called = %d, want %d", called, callsBeforeCont)
+	}
+
+	followAtLimit := strings.Repeat("b", maxPromptBytes)
+	code, body, raw, _ = doReq(t, srv, http.MethodPost, "/api/executions/"+limitID+"/continue", map[string]any{
+		"prompt":       followAtLimit,
+		"with_context": true,
+	})
+	contID, _ := startedOf(t, code, body, raw)
+	waitExecution(t, st, contID)
+	waitWork(t, srv.exec, contID)
+
+	// Scenario: Rerun of a run whose prompt is over the limit is refused.
+	const oversizedID = "run-oversized-stored"
+	if err := st.CreateExecution(ctx, store.Execution{
+		ExecID:     oversizedID,
+		Kind:       "portal_run",
+		Agent:      "claude",
+		Status:     "succeeded",
+		PromptText: strings.Repeat("r", 300000),
+		Workdir:    root,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	beforeRerun := runsCount()
+	callsBeforeRerun := called
+	code, body, raw, _ = doReq(t, srv, http.MethodPost, "/api/executions/"+oversizedID+"/rerun", map[string]any{})
+	if c, msg := errorOf(body); code != http.StatusBadRequest || c != "invalid_input" || !strings.Contains(msg, limitText) {
+		t.Fatalf("POST /api/executions/%s/rerun (oversized stored prompt) = %d %s; want 400 invalid_input naming %s", oversizedID, code, raw, limitText)
+	}
+	if got := runsCount(); got != beforeRerun {
+		t.Fatalf("oversized rerun wrote a row: runs = %d, want %d", got, beforeRerun)
+	}
+	if called != callsBeforeRerun {
+		t.Fatalf("oversized rerun started agent: called = %d, want %d", called, callsBeforeRerun)
+	}
+}

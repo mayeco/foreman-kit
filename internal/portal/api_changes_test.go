@@ -106,6 +106,7 @@ func TestTheActionsOfAChange(t *testing.T) {
 		t.Errorf("the agent ran in %q, want the worktree of add-search", ranIn)
 	}
 	refuses(t, srv, "/api/changes/add-search/prompts", map[string]any{"engine": "hermes", "prompt": "  "}, http.StatusBadRequest, "invalid_input")
+	refuses(t, srv, "/api/changes/add-search/prompts", map[string]any{"engine": "hermes", "prompt": strings.Repeat("x", maxPromptBytes+1)}, http.StatusBadRequest, "invalid_input")
 	refuses(t, srv, "/api/changes/add-search/prompts", map[string]any{"engine": "no-such-engine", "prompt": "x"}, http.StatusBadRequest, "invalid_input")
 	refuses(t, srv, "/api/changes/add-ui/prompts", map[string]any{"engine": "hermes", "prompt": "x"}, http.StatusConflict, "conflict")
 
@@ -259,5 +260,27 @@ func TestAcceptingABrokenBase(t *testing.T) {
 	refuses(t, srv, "/api/bases/accept", map[string]any{"repo": "repos/core"}, http.StatusConflict, "conflict")
 	if code, _, _, hdr := doReq(t, srv, http.MethodGet, "/api/bases/accept", nil); code != http.StatusMethodNotAllowed || hdr.Get("Allow") != "POST" {
 		t.Errorf("GET /api/bases/accept = %d (Allow %q), want 405", code, hdr.Get("Allow"))
+	}
+}
+
+func TestChangePromptLengthLimit(t *testing.T) {
+	srv, st, root := setupTestPortal(t)
+	seedChanges(t, st, root)
+	ctx := context.Background()
+	called := false
+	kitOf(srv).agent = func(_ context.Context, _, _, _ string) (string, int, error) {
+		called = true
+		return "ok", 0, nil
+	}
+
+	refuses(t, srv, "/api/changes/add-search/prompts", map[string]any{
+		"engine": "hermes",
+		"prompt": strings.Repeat("x", maxPromptBytes+1),
+	}, http.StatusBadRequest, "invalid_input")
+	if runs, err := st.ListExecutions(ctx, "portal_run", "add-search", 50); err != nil || len(runs) != 0 {
+		t.Fatalf("oversized prompt to add-search left runs = %+v (err %v), want none", runs, err)
+	}
+	if called {
+		t.Fatal("oversized prompt to add-search started the agent")
 	}
 }

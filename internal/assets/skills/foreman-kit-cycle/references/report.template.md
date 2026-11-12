@@ -46,6 +46,10 @@
 
 <blocks, risk reviews, regressions, items in needs_triage, and each setting the "Settings" line of "This cycle" recommends changing, with its command; "nothing">
 
+## Scratch instances
+
+<each disposable instance used (directory, state directory, database and portal port); "none">
+
 ## Commands executed
 
 ```bash

@@ -72,8 +72,8 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:           "foreman-kit",
-		Short:         "Foreman: autonomous agent orchestration for OpenSpec applications",
+		Use:   "foreman-kit",
+		Short: "Foreman: autonomous agent orchestration for OpenSpec applications",
 		Long: "Foreman: autonomous agent orchestration for OpenSpec applications.\n\n" +
 			"Run alone in an application, foreman-kit runs its daemon in the foreground: the cycle, the\n" +
 			"dispatcher, the merger and the portal, with the log in the terminal, until Ctrl+C.\n" +

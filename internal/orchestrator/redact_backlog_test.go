@@ -43,7 +43,7 @@ func TestBacklogItemFromMapClampsHugeText(t *testing.T) {
 	item := BacklogItemFromMap(map[string]any{
 		"change_name": "huge-desc",
 		"description": desc,
-		"why":        why,
+		"why":         why,
 	})
 	if len(item.Description) > maxBacklogTextBytes || len(item.Why) > maxBacklogTextBytes {
 		t.Fatalf("expected backlog text to be clamped to %d bytes, got description=%d why=%d", maxBacklogTextBytes, len(item.Description), len(item.Why))

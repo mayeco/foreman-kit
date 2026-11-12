@@ -59,13 +59,13 @@ func LoadDaemonConfig(root string) DaemonConfig {
 // a dispatcher starts each backlog item as soon as it is eligible and a worker slot is free, both woken by
 // a Notifier rather than a poll. Only the cycle's judgment (verify, explore, curate memory) is periodic.
 type DaemonOptions struct {
-	Detach         bool
+	Detach bool
 	// Console runs the daemon for a person at a terminal (`foreman-kit` alone): its log goes to the
 	// terminal as well as to daemon.log, and Started is told where the portal and the log are.
 	Console bool
 	// Started, when set, is called once the foreground daemon holds its lock and its portal listens,
 	// with the portal's URL ("" without a portal) and the path of its log.
-	Started func(webURL, logPath string)
+	Started        func(webURL, logPath string)
 	Web            bool
 	WebSet         bool
 	Bind           string

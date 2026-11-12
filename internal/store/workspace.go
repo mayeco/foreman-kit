@@ -163,7 +163,7 @@ func findUmbrellaRoot(root string) string {
 }
 
 func worktreeWithin(startDir, envRoot string) string {
-	umbrella := findUmbrellaRoot(envRoot)
+	umbrella := MainRoot(envRoot)
 	cur := filepath.Clean(startDir)
 	for {
 		parent := filepath.Dir(cur)

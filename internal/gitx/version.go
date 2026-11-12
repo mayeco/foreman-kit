@@ -3,10 +3,12 @@ package gitx
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // MinVersion is the oldest git version the kit supports.
@@ -80,6 +82,14 @@ func VersionAtLeast(have, minimum string) bool {
 	return h[2] >= m[2]
 }
 
+var (
+	versionCacheMu   sync.Mutex
+	cachedGitPath    string
+	cachedGitModNano int64
+	cachedGitSize    int64
+	cachedGitVer     string
+)
+
 // Version resolves `git` on PATH and parses its version triple. When `git` is found on PATH but its
 // version output cannot be read or parsed, path is still returned alongside the error.
 func Version(ctx context.Context) (version string, path string, err error) {
@@ -90,6 +100,21 @@ func Version(ctx context.Context) (version string, path string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("git not found on PATH: %w", err)
 	}
+	var modNano, size int64
+	if fi, statErr := os.Stat(path); statErr == nil {
+		modNano = fi.ModTime().UnixNano()
+		size = fi.Size()
+		// Cache only real git binaries (>= 4 KiB); small wrapper scripts in tests always run fresh.
+		if size >= 4096 {
+			versionCacheMu.Lock()
+			if path == cachedGitPath && modNano == cachedGitModNano && size == cachedGitSize && cachedGitVer != "" {
+				ver := cachedGitVer
+				versionCacheMu.Unlock()
+				return ver, path, nil
+			}
+			versionCacheMu.Unlock()
+		}
+	}
 	out, runErr := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	firstLine := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 	ver, ok := ParseVersion(firstLine)
@@ -98,6 +123,14 @@ func Version(ctx context.Context) (version string, path string, err error) {
 			firstLine = runErr.Error()
 		}
 		return "", path, fmt.Errorf("cannot read git version from %s (%q)", path, firstLine)
+	}
+	if size >= 4096 {
+		versionCacheMu.Lock()
+		cachedGitPath = path
+		cachedGitModNano = modNano
+		cachedGitSize = size
+		cachedGitVer = ver
+		versionCacheMu.Unlock()
 	}
 	return ver, path, nil
 }

@@ -52,6 +52,10 @@ type ChangeGateReportRow struct {
 }
 
 // BuildReport generates the calibration report of the evaluator from SQLite events and workspace state.
+// outcomeOf names what became of each judged change. A nil outcomeOf means the caller has no
+// workspace knowledge, and every change is reported as "pending or abandoned"; the
+// evaluation-report command supplies config.DefaultOutcomeResolver, which this package cannot
+// import without a cycle.
 func BuildReport(ctx context.Context, root string, st *store.Store, since time.Time, onlyGate string, outcomeOf func(string) string) (*Report, error) {
 	pol, err := LoadPolicy(root)
 	if err != nil {

@@ -711,7 +711,7 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 				fmt.Fprintf(stderr, "evaluation-report: %v\n", err)
 				return wrapCode(2)
 			}
-			rep, err := evaluator.BuildReport(ctx, root, st, sinceTime, reportGate, nil)
+			rep, err := evaluator.BuildReport(ctx, root, st, sinceTime, reportGate, config.DefaultOutcomeResolver(ctx, root, st))
 			if err != nil {
 				fmt.Fprintf(stderr, "evaluation-report: %v\n", err)
 				return wrapCode(1)

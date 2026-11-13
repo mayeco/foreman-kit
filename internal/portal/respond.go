@@ -22,8 +22,8 @@ type answer struct {
 	message string
 }
 
-// answerOf returns the answer of an error: 404, 400, 409, 403 or 405 for a problem, 400 for a page
-// cursor that no page handed out, and 500 for anything else.
+// answerOf returns the answer of an error: 404, 400, 409, 403, 405 or 429 for a problem, 400 for a
+// page cursor that no page handed out, and 500 for anything else.
 func answerOf(err error) answer {
 	var p *problem
 	switch {
@@ -37,6 +37,8 @@ func answerOf(err error) answer {
 			return answer{http.StatusForbidden, "forbidden", sentence(p.message)}
 		case methodProblem:
 			return answer{http.StatusMethodNotAllowed, "method_not_allowed", sentence(p.message)}
+		case rateLimitedProblem:
+			return answer{http.StatusTooManyRequests, "rate_limited", sentence(p.message)}
 		}
 		return answer{http.StatusBadRequest, "invalid_input", sentence(p.message)}
 	case errors.Is(err, store.ErrBadCursor):

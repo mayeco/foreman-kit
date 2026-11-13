@@ -24,7 +24,7 @@ func layerOf(file string) string {
 		return "shared"
 	case strings.HasPrefix(file, "svc_"):
 		return "service"
-	case file == "server.go":
+	case file == "server.go", file == "token_limiter.go":
 		return "server"
 	case file == "kit.go":
 		return "kit"

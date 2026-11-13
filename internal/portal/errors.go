@@ -20,6 +20,7 @@ const (
 	conflictProblem
 	forbiddenProblem
 	methodProblem
+	rateLimitedProblem
 )
 
 func (p *problem) Error() string { return p.message }
@@ -48,4 +49,9 @@ func errForbidden(format string, args ...any) error {
 // errMethod says that the address exists and does not take the method of the request.
 func errMethod(format string, args ...any) error {
 	return &problem{methodProblem, fmt.Sprintf(format, args...)}
+}
+
+// errRateLimited says that the caller has sent too many wrong tokens from its address in the window.
+func errRateLimited(format string, args ...any) error {
+	return &problem{rateLimitedProblem, fmt.Sprintf(format, args...)}
 }

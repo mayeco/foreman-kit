@@ -89,9 +89,21 @@ func (s *Server) validatePageRequest(w http.ResponseWriter, r *http.Request) boo
 		http.Error(w, "The portal does not answer to this host.", http.StatusForbidden)
 		return false
 	}
-	if s.requiresNonLoopbackAuth(r) && !hasValidPortalToken(r) {
-		http.Error(w, "A request from outside this machine needs the token of the portal.", http.StatusForbidden)
-		return false
+	if s.requiresNonLoopbackAuth(r) {
+		ip := remoteIP(r)
+		if retryAfter, ok := s.tokens.locked(ip); ok {
+			w.Header().Set("Retry-After", retryAfterHeader(retryAfter))
+			http.Error(w, "Too many wrong tokens from this address; try again later.", http.StatusTooManyRequests)
+			return false
+		}
+		provided := providedPortalToken(r)
+		if !matchesPortalToken(provided) {
+			if provided != "" {
+				s.tokens.fail(ip)
+			}
+			http.Error(w, "A request from outside this machine needs the token of the portal.", http.StatusForbidden)
+			return false
+		}
 	}
 	return true
 }

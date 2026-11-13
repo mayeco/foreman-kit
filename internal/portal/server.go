@@ -68,6 +68,7 @@ type Server struct {
 	exec    *executions       // what the portal launched (svc_executions.go)
 	changes *changes          // what a person decides about a change (svc_changes.go)
 	work    *workspace        // what a person does about the kit and its queue (svc_workspace.go)
+	tokens  *tokenLimiter     // throttles wrong portal tokens per remote address (token_limiter.go)
 	bindMu  sync.Mutex
 	// backlogEvery is how often a portal that serves asks the files of the backlog whether they changed.
 	backlogEvery time.Duration
@@ -103,6 +104,7 @@ func New(root string, st *store.Store, kit Kit, opts ...Option) (*Server, error)
 		store:        st,
 		kit:          kit,
 		exec:         newExecutions(root, st, kit),
+		tokens:       newTokenLimiter(),
 		backlogEvery: 5 * time.Second,
 	}
 	for _, opt := range opts {
@@ -263,23 +265,29 @@ func (s *Server) requiresNonLoopbackAuth(r *http.Request) bool {
 	return false
 }
 
-func hasValidPortalToken(r *http.Request) bool {
-	expected := strings.TrimSpace(os.Getenv("FOREMANKIT_PORTAL_TOKEN"))
-	if expected == "" || r == nil {
-		return false
+func providedPortalToken(r *http.Request) string {
+	if r == nil {
+		return ""
 	}
-	var provided string
 	authHdr := strings.TrimSpace(r.Header.Get("Authorization"))
 	if len(authHdr) > 7 && strings.EqualFold(authHdr[:7], "Bearer ") {
-		provided = strings.TrimSpace(authHdr[7:])
+		if provided := strings.TrimSpace(authHdr[7:]); provided != "" {
+			return provided
+		}
 	}
-	if provided == "" {
-		provided = strings.TrimSpace(r.Header.Get("X-OpenSpec-Token"))
-	}
-	if provided == "" {
+	return strings.TrimSpace(r.Header.Get("X-OpenSpec-Token"))
+}
+
+func matchesPortalToken(provided string) bool {
+	expected := strings.TrimSpace(os.Getenv("FOREMANKIT_PORTAL_TOKEN"))
+	if expected == "" || provided == "" {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+func hasValidPortalToken(r *http.Request) bool {
+	return matchesPortalToken(providedPortalToken(r))
 }
 
 func (s *Server) validateAPIRequest(w http.ResponseWriter, r *http.Request, path string) bool {
@@ -288,9 +296,21 @@ func (s *Server) validateAPIRequest(w http.ResponseWriter, r *http.Request, path
 		fail(w, r, errForbidden("the portal does not answer to the host %q", reqHost))
 		return false
 	}
-	if s.requiresNonLoopbackAuth(r) && !hasValidPortalToken(r) {
-		fail(w, r, errForbidden("a request from outside this machine needs the token of the portal"))
-		return false
+	if s.requiresNonLoopbackAuth(r) {
+		ip := remoteIP(r)
+		if retryAfter, ok := s.tokens.locked(ip); ok {
+			w.Header().Set("Retry-After", retryAfterHeader(retryAfter))
+			fail(w, r, errRateLimited("too many wrong tokens from this address; try again later"))
+			return false
+		}
+		provided := providedPortalToken(r)
+		if !matchesPortalToken(provided) {
+			if provided != "" {
+				s.tokens.fail(ip)
+			}
+			fail(w, r, errForbidden("a request from outside this machine needs the token of the portal"))
+			return false
+		}
 	}
 
 	switch r.Method {

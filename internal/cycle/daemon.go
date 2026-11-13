@@ -159,6 +159,11 @@ func StartDaemon(ctx context.Context, root string, st *store.Store, opts DaemonO
 		stderr = os.Stderr
 	}
 
+	if err := gitx.CheckVersion(ctx); err != nil {
+		fmt.Fprintf(stderr, "daemon: %v\n", err)
+		return 1
+	}
+
 	// Check if a daemon is already running for this project
 	if st != nil {
 		if dl := liveDaemonLock(ctx, st); dl != nil {
@@ -170,11 +175,6 @@ func StartDaemon(ctx context.Context, root string, st *store.Store, opts DaemonO
 			fmt.Fprintf(stdout, "daemon: already running (pid=%d%s log=%s)\n", dl.PID, webNote, store.RuntimePath(root, "daemon.log"))
 			return 0
 		}
-	}
-
-	if err := gitx.CheckVersion(ctx); err != nil {
-		fmt.Fprintf(stderr, "daemon: %v\n", err)
-		return 1
 	}
 
 	// The daemon reads its file once, when it starts: it does not start on one it cannot use. What

@@ -47,6 +47,9 @@ func TestDispatcherAndMergerRefuseOldGitAtStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	if err := st.SyncJSONToSQLite(ctx, root); err != nil {
+		t.Fatal(err)
+	}
 
 	var dispLog bytes.Buffer
 	disp, err := NewDispatcher(DispatcherOptions{
@@ -81,6 +84,9 @@ func TestDispatcherAndMergerRefuseOldGitAtStart(t *testing.T) {
 	// Verify no worktree was created and the item remains queued (not blocked, not ready).
 	if _, statErr := os.Stat(filepath.Join(root, ".worktrees")); !os.IsNotExist(statErr) {
 		t.Fatalf("expected no .worktrees directory to be created, stat err=%v", statErr)
+	}
+	if state, err := st.ChangeState(ctx, "queued-item"); err != nil || state != store.ChangeQueued {
+		t.Fatalf("expected queued-item state in store to be %q, got %q (err=%v)", store.ChangeQueued, state, err)
 	}
 	blocked, _ := st.ListQuarantine(ctx, "")
 	if len(blocked) != 0 {

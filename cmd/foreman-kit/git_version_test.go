@@ -122,6 +122,9 @@ func setupGitVersionCLITestApp(t *testing.T) (string, *store.Store, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	if err := st.SyncJSONToSQLite(ctx, root); err != nil {
+		t.Fatal(err)
+	}
 	return root, st, toolsDir
 }
 
@@ -147,12 +150,18 @@ func assertNoWorktreeAndItemStillQueued(t *testing.T, ctx context.Context, root 
 	if _, err := os.Stat(filepath.Join(root, ".worktrees")); !os.IsNotExist(err) {
 		t.Fatalf("expected no .worktrees directory to be created, stat err=%v", err)
 	}
+	if _, err := os.Stat(filepath.Join(root, ".worktrees", "worker-queued-item")); !os.IsNotExist(err) {
+		t.Fatalf("expected no worker-queued-item worktree to be created, stat err=%v", err)
+	}
 	if calls, err := os.ReadFile(gitCallLog); err == nil && strings.TrimSpace(string(calls)) != "" {
 		t.Fatalf("expected no git subcommands other than --version to run, got:\n%s", string(calls))
 	}
 	items, err := cycle.ReadJSONList(filepath.Join(root, cycle.BacklogFile))
 	if err != nil || len(items) != 1 || fmt.Sprint(items[0]["change_name"]) != "queued-item" {
 		t.Fatalf("expected queued-item to remain in %s, got %+v (err=%v)", cycle.BacklogFile, items, err)
+	}
+	if state, err := st.ChangeState(ctx, "queued-item"); err != nil || state != store.ChangeQueued {
+		t.Fatalf("expected queued-item state in store to be %q, got %q (err=%v)", store.ChangeQueued, state, err)
 	}
 	if blocked, _ := st.ListQuarantine(ctx, ""); len(blocked) != 0 {
 		t.Fatalf("expected no quarantined changes, got %+v", blocked)

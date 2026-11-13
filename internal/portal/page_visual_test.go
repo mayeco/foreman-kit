@@ -239,6 +239,18 @@ func TestAPersonAsksForACheckAndSaysHowItEnded(t *testing.T) {
 	if state, err := st.ChangeState(ctx, "no-such-change"); err != nil || state != "" {
 		t.Errorf("a check asked for a change the kit does not know left the change on record as %q (%v)", state, err)
 	}
+	if items, err := st.ListVisualQA(ctx, ""); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, it := range items {
+			if it.ChangeName == "no-such-change" {
+				t.Errorf("a check asked for a change the kit does not know was queued: %+v", it)
+			}
+		}
+	}
+	if code, _, raw, _ := doReq(t, srv, http.MethodGet, "/api/changes", nil); code != http.StatusOK || strings.Contains(raw, "no-such-change") {
+		t.Errorf("GET /api/changes = %d and lists the change the kit does not know: %s", code, raw)
+	}
 
 	// Its verdict, once.
 	verdict := "/api/visual-qa/items/" + id + "/verdict"

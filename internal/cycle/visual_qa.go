@@ -341,6 +341,16 @@ func VisualQARequest(ctx context.Context, root string, st *store.Store, what, ch
 	if changeName != "" && !ChangeNameRe.MatchString(changeName) {
 		return nil, fmt.Errorf("%q is not the name of a change", changeName)
 	}
+	if changeName != "" {
+		// The store registers any name it meets; a request must not invent a change.
+		state, err := st.ChangeState(ctx, changeName)
+		if err != nil {
+			return nil, err
+		}
+		if state == "" {
+			return nil, fmt.Errorf("the kit knows no change named %q", changeName)
+		}
+	}
 	vcfg := GetVisualQASettings(root)
 	if !vcfg.Enabled {
 		return nil, fmt.Errorf("visual QA is disabled (%s)", settings.VisualQAEnabled.Where())

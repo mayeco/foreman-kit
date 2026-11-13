@@ -2021,6 +2021,7 @@ func TestStressScenarios_G_H_P(t *testing.T) {
 	}
 
 	// Enqueue a visual QA item and verify failing ServicePrepareFunc stops VisualQABegin before claiming items
+	registerTestChange(t, st, "fix-typo")
 	_, _ = VisualQARequest(ctx, ws, st, "Check login header", "fix-typo", io.Discard)
 	err = VisualQABegin(ctx, ws, st, VisualQAOptions{
 		Stamp: "20261108T172500Z",

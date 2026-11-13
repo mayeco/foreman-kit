@@ -549,6 +549,7 @@ func TestVisualQAAndProgressAndRunner(t *testing.T) {
 	}
 
 	// Test VisualQA request, begin, status, done, end
+	registerTestChange(t, st, "add-login")
 	var vqaOut bytes.Buffer
 	item, err := VisualQARequest(ctx, appDir, st, "Check login form alignment", "add-login", &vqaOut)
 	if err != nil {

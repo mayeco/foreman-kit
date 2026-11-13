@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mayeco/foreman-kit/internal/portal"
 	"github.com/mayeco/foreman-kit/internal/store"
@@ -103,6 +104,19 @@ func TestVisualQARequestChangeNameValidation(t *testing.T) {
 	}
 
 	// 2. Valid change name "add-billing" with visual QA enabled queues.
+	// The change is on record, as the backlog sync or a run would leave it.
+	if err := st.EmitEvent(ctx, store.EventInput{TS: time.Now(), Event: "test.registered", Change: "add-billing"}); err != nil {
+		t.Fatalf("registering add-billing: %v", err)
+	}
+	// A well-formed name of a change the kit has no record of is refused and leaves no row.
+	out.Reset()
+	errBuf.Reset()
+	if c := Run(ctx, []string{"visual-qa", "request", "check x", "--change", "no-such-change"}, &out, &errBuf); c == 0 || !strings.Contains(errBuf.String(), "no-such-change") || strings.Contains(out.String(), "queued") {
+		t.Fatalf("request for an unknown change = %d (stdout=%q stderr=%q)", c, out.String(), errBuf.String())
+	}
+	if state, err := st.ChangeState(ctx, "no-such-change"); err != nil || state != "" {
+		t.Fatalf("the refused change is on record as %q (%v)", state, err)
+	}
 	out.Reset()
 	errBuf.Reset()
 	code = Run(ctx, []string{"visual-qa", "request", "check the totals", "--change", "add-billing"}, &out, &errBuf)

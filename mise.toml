@@ -249,6 +249,50 @@ id="$(gh run list --workflow npm-publish.yml --limit 1 --json databaseId -q '.[0
 gh run watch "$id" --exit-status
 '''
 
+[tasks."npm:publish:local"]
+description = "Publish on npm, from this machine with your npm login, the package of a GitHub release (default: the latest)"
+usage = '''
+arg "[tag]" help="Release tag whose binaries are published (v4.2.0); default: the latest release"
+flag "--dry-run" help="Download, check and pack the package, publish nothing"
+'''
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+tag="${usage_tag:-}"
+if [ -z "$tag" ]; then
+  tag="$(gh release view --json tagName -q .tagName)"
+fi
+version="${tag#v}"
+case "$version" in
+  *-*) dist_tag=next ;;
+  *) dist_tag=latest ;;
+esac
+if [ "${usage_dry_run:-false}" != "true" ]; then
+  who="$(npm whoami 2>/dev/null)" || { echo "npm:publish:local: not logged in to npm: run npm login first" >&2; exit 1; }
+  echo "npm:publish:local: publishing as $who"
+  if npm view "@mayeco/foreman-kit@$version" version >/dev/null 2>&1; then
+    echo "npm:publish:local: @mayeco/foreman-kit@$version is already on npm; nothing to publish"
+    exit 0
+  fi
+fi
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+gh release download "$tag" --pattern 'foreman-kit-*' --pattern checksums.txt --dir "$work"
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$work" && sha256sum --check --ignore-missing checksums.txt)
+else
+  (cd "$work" && shasum -a 256 --check --ignore-missing checksums.txt)
+fi
+tgz="$(FOREMANKIT_KIT_VERSION="$version" scripts/npm-pack.sh --prebuilt "$work" --public)"
+tar -tzf "$tgz"
+if [ "${usage_dry_run:-false}" = "true" ]; then
+  echo "npm:publish:local: packed $tgz ($version, dist-tag $dist_tag); dry run, nothing published"
+  exit 0
+fi
+npm publish "$tgz" --access public --tag "$dist_tag"
+echo "npm:publish:local: published @mayeco/foreman-kit@$version under $dist_tag"
+'''
+
 [tasks."release:snapshot"]
 description = "Build a release locally with GoReleaser into dist/release/; nothing is published"
 run = "goreleaser release --snapshot --clean"

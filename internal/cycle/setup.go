@@ -369,16 +369,26 @@ func resolveSelection(cur AgentsFileConfig, opts KitOptions) ([]string, map[stri
 		var chosen []string
 		if len(given) > 0 {
 			chosen = given
-		} else if len(agents) == 1 {
-			chosen = []string{agents[0]}
-		} else if len(kept) > 0 {
+		} else if len(kept) > 0 && len(agents) > 1 {
 			chosen = kept
 		} else {
-			chosen = []string{agents[0]}
+			chosen = []string{firstThatHoldsARole(agents)}
 		}
 		roles[role] = chosen
 	}
 	return agents, roles, nil
+}
+
+// firstThatHoldsARole returns the first of agents whose shipped commands let it hold a role (not a
+// detached agent without a stop command), or the first agent when none does: config check then
+// says why it cannot.
+func firstThatHoldsARole(agents []string) string {
+	for _, a := range agents {
+		if spec, known := config.ShippedCommands(a); !known || !spec.HoldsNoRole() {
+			return a
+		}
+	}
+	return agents[0]
 }
 
 func buildEmbeddedManifest() (skillsMap map[string][]byte, seedsMap map[string][]byte, err error) {

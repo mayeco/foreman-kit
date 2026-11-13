@@ -154,10 +154,10 @@ func TestCheckRefusesAnAgentWithoutRestrictedCommandWhileRestricted(t *testing.T
 	if rep := Check(root)[".foreman-kit/agents.yaml"]; len(rep.Errors) > 0 {
 		t.Fatalf("the agents of the test umbrella do not check clean: %v", rep.Errors)
 	}
-	if err := Set(root, string(settings.AgentPermissions), settings.PermissionsRestricted, false, nil); err == nil || !strings.Contains(err.Error(), "commands.hermes.restricted: missing") {
-		t.Fatalf("restricted was accepted with hermes in a role (it has no restricted command): %v", err)
+	if err := Set(root, string(settings.AgentPermissions), settings.PermissionsRestricted, false, nil); err == nil || !strings.Contains(err.Error(), "commands.copilot.restricted: missing") {
+		t.Fatalf("restricted was accepted with copilot in a role (it has no restricted command): %v", err)
 	}
-	// Without hermes in a role, every agent left has one.
+	// Without copilot in a role, every agent left has one.
 	if err := Set(root, string(settings.RoleAgents("plan")), "claude", false, nil); err != nil {
 		t.Fatal(err)
 	}

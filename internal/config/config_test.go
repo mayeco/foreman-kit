@@ -42,8 +42,8 @@ func setupTestUmbrella(t *testing.T) (string, *store.Store) {
 	}
 
 	// Write .foreman-kit/agents.yaml
-	err = Write(root, []string{"claude", "hermes", "codex"}, map[string][]string{
-		"plan":  {"claude", "hermes"},
+	err = Write(root, []string{"claude", "copilot", "codex"}, map[string][]string{
+		"plan":  {"claude", "copilot"},
 		"build": {"codex", "claude"},
 		"cycle": {"claude"},
 	}, settings.SelectionInOrder)
@@ -223,7 +223,7 @@ func TestAgentsConfigAndStoreRegistry(t *testing.T) {
 	}
 
 	eng, err := Engine(root, "plan")
-	if err != nil || eng != "claude,hermes" {
+	if err != nil || eng != "claude,copilot" {
 		t.Fatalf("Engine(plan) got %q, err=%v", eng, err)
 	}
 
@@ -242,13 +242,13 @@ func TestAgentsConfigAndStoreRegistry(t *testing.T) {
 	}
 
 	ppid := os.Getppid()
-	arranged, err := Arrange(ctx, root, st, "claude,hermes", ppid)
+	arranged, err := Arrange(ctx, root, st, "claude,copilot", ppid)
 	if err != nil {
 		t.Fatalf("Arrange failed: %v", err)
 	}
-	// Because claude is in use (1) and hermes is free (0), least_busy must pick hermes first
-	if len(arranged) != 2 || arranged[0] != "hermes" || arranged[1] != "claude" {
-		t.Fatalf("expected least_busy to pick [hermes claude], got %v", arranged)
+	// Because claude is in use (1) and copilot is free (0), least_busy must pick copilot first
+	if len(arranged) != 2 || arranged[0] != "copilot" || arranged[1] != "claude" {
+		t.Fatalf("expected least_busy to pick [copilot claude], got %v", arranged)
 	}
 
 	_ = Release(ctx, root, st, pid)
@@ -260,7 +260,7 @@ func TestAgentsConfigAndStoreRegistry(t *testing.T) {
 
 	// Test CLI
 	var outBuf, errBuf bytes.Buffer
-	if rc := RunAgentsCLI(ctx, root, st, []string{"list"}, &outBuf, &errBuf); rc != 0 || strings.TrimSpace(outBuf.String()) != "claude hermes codex" {
+	if rc := RunAgentsCLI(ctx, root, st, []string{"list"}, &outBuf, &errBuf); rc != 0 || strings.TrimSpace(outBuf.String()) != "claude copilot codex" {
 		t.Fatalf("RunAgentsCLI list failed: rc=%d out=%q", rc, outBuf.String())
 	}
 }
@@ -413,14 +413,14 @@ func TestKitConfigShowCheckAndSetAST(t *testing.T) {
 		t.Fatalf("expected approved_by: human in .foreman-kit/cycle.yaml:\n%s", string(afterBytes))
 	}
 
-	// Set agents.roles.cycle.agents to [hermes, claude]
+	// Set agents.roles.cycle.agents to [copilot, claude]
 	setOut.Reset()
-	if err := Set(root, "agents.roles.cycle.agents", "hermes,claude", false, &setOut); err != nil {
+	if err := Set(root, "agents.roles.cycle.agents", "copilot,claude", false, &setOut); err != nil {
 		t.Fatalf("Set agents.roles.cycle.agents failed: %v", err)
 	}
 	engs, err := Engines(root, "cycle")
-	if err != nil || strings.Join(engs, ",") != "hermes,claude" {
-		t.Fatalf("expected cycle engines hermes,claude after Set, got %v (err=%v)", engs, err)
+	if err != nil || strings.Join(engs, ",") != "copilot,claude" {
+		t.Fatalf("expected cycle engines copilot,claude after Set, got %v (err=%v)", engs, err)
 	}
 
 	// Reject agent not listed in .foreman-kit/agents.yaml

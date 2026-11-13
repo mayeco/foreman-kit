@@ -51,6 +51,7 @@ var FaultScenarios = []string{
 	"fault-jev-outage-timeout-garbage-enforce",
 	"fault-llm-diagnostics-provider-failures",
 	"fault-backlog-edge-cases",
+	"fault-agent-detached-gateway",
 }
 
 func isFaultScenario(name string) bool {
@@ -252,6 +253,8 @@ func (fe *faultEnv) run(name string) error {
 		err = fe.llmProviderFailures()
 	case "fault-backlog-edge-cases":
 		err = fe.backlogEdgeCases()
+	case "fault-agent-detached-gateway":
+		err = fe.agentDetachedGateway()
 	default:
 		err = fmt.Errorf("unknown fault scenario %q", name)
 	}

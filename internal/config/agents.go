@@ -42,17 +42,35 @@ type AgentMeta struct {
 	Ping string `json:"ping,omitempty" yaml:"ping,omitempty"`
 	// StdinNull says the CLI needs its standard input closed.
 	StdinNull bool `json:"stdin_null,omitempty" yaml:"stdin_null,omitempty"`
+	// Detached says the CLI hands its work to a service outside the process the kit starts (the
+	// hermes gateway): killing the process the kit runs does not stop the work, and the watchdog
+	// cannot see it. Such an agent holds a role only with a Stop command.
+	Detached bool `json:"detached,omitempty" yaml:"detached,omitempty"`
+	// Stop is the command that stops the work of one call of a detached agent ("" when its CLI has
+	// none).
+	Stop string `json:"stop,omitempty" yaml:"stop,omitempty"`
+	// Activity lists the files a detached agent writes as it works (its session store): a change of
+	// one of them is activity of its call.
+	Activity []string `json:"activity,omitempty" yaml:"activity,omitempty"`
 }
 
 // AgentCommandSpec is how an agent is executed: commands.<agent> of .foreman-kit/agents.yaml. In the file
 // it is a mapping with run, restricted and ping; a bare string or list is its run command.
+//
+// Detached, Stop and Activity describe a CLI that hands its work to a service outside the process
+// the kit starts: detached says it does, stop is the command that stops the work of one call
+// ({{workdir}} and {{pid}}, the pid of the process the kit ran), and activity the files it writes as
+// it works, whose changes the watchdog counts as activity of the call.
 type AgentCommandSpec struct {
-	Run        any    `json:"run,omitempty" yaml:"run,omitempty"`
-	Restricted any    `json:"restricted,omitempty" yaml:"restricted,omitempty"`
-	Ping       any    `json:"ping,omitempty" yaml:"ping,omitempty"`
-	Skills     string `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Tool       string `json:"tool,omitempty" yaml:"tool,omitempty"`
-	StdinNull  *bool  `json:"stdin_null,omitempty" yaml:"stdin_null,omitempty"`
+	Run        any      `json:"run,omitempty" yaml:"run,omitempty"`
+	Restricted any      `json:"restricted,omitempty" yaml:"restricted,omitempty"`
+	Ping       any      `json:"ping,omitempty" yaml:"ping,omitempty"`
+	Skills     string   `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Tool       string   `json:"tool,omitempty" yaml:"tool,omitempty"`
+	StdinNull  *bool    `json:"stdin_null,omitempty" yaml:"stdin_null,omitempty"`
+	Detached   bool     `json:"detached,omitempty" yaml:"detached,omitempty"`
+	Stop       any      `json:"stop,omitempty" yaml:"stop,omitempty"`
+	Activity   []string `json:"activity,omitempty" yaml:"activity,omitempty"`
 }
 
 // The tool lists the kit ships in the commands of Claude Code and GitHub Copilot.
@@ -90,19 +108,24 @@ var SUPPORTED = map[string]AgentMeta{
 		Run:    "copilot -p {{prompt}} --silent --allow-all-tools " + copilotDenied + " {{args}}",
 		Ping:   "copilot -p {{prompt}} --silent {{args}}",
 	},
+	// hermes -z hands its session to the hermes gateway and has no command that stops one session:
+	// it is detached, without a stop command, so it holds no role.
 	"hermes": {
-		Label:  "Hermes",
-		Tool:   "hermes",
-		Skills: ".hermes/skills",
-		Run:    "hermes -z {{prompt}} --yolo --accept-hooks {{args}}",
-		Ping:   "hermes -z {{prompt}} {{args}}",
+		Label:    "Hermes",
+		Tool:     "hermes",
+		Skills:   ".hermes/skills",
+		Run:      "hermes -z {{prompt}} --yolo --accept-hooks {{args}}",
+		Ping:     "hermes -z {{prompt}} {{args}}",
+		Detached: true,
 	},
+	// opencode run connects to a background service (opencode serve --service) unless --standalone
+	// gives it a private server, inside the process the kit runs.
 	"opencode": {
 		Label:  "OpenCode",
 		Tool:   "opencode",
 		Skills: ".opencode/skills",
-		Run:    "opencode run --format json {{args}} {{prompt}}",
-		Ping:   "opencode run {{args}} {{prompt}}",
+		Run:    "opencode run --standalone --format json {{args}} {{prompt}}",
+		Ping:   "opencode run --standalone {{args}} {{prompt}}",
 	},
 	"agy": {
 		Label:      "Google Antigravity",
@@ -186,7 +209,20 @@ func ShippedCommands(name string) (AgentCommandSpec, bool) {
 		yes := true
 		spec.StdinNull = &yes
 	}
+	spec.Detached = m.Detached
+	if m.Stop != "" {
+		spec.Stop = m.Stop
+	}
+	if len(m.Activity) > 0 {
+		spec.Activity = append([]string(nil), m.Activity...)
+	}
 	return spec, true
+}
+
+// HoldsNoRole reports whether spec describes an agent that cannot hold a role: a detached one with
+// no stop command, whose calls would keep working after the kit stops them.
+func (spec AgentCommandSpec) HoldsNoRole() bool {
+	return spec.Detached && spec.Stop == nil
 }
 
 // SupportedOrder preserves the canonical order of SUPPORTED from bin/lib/agents.rb.
@@ -277,6 +313,24 @@ func ParseCommandSpec(raw any) (AgentCommandSpec, bool) {
 		if b, ok := v["stdin_null"].(bool); ok {
 			val := b
 			spec.StdinNull = &val
+		}
+		if b, ok := v["detached"].(bool); ok {
+			spec.Detached = b
+		}
+		spec.Stop = v["stop"]
+		switch list := v["activity"].(type) {
+		case []any:
+			for _, item := range list {
+				if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+					spec.Activity = append(spec.Activity, strings.TrimSpace(text))
+				}
+			}
+		case []string:
+			spec.Activity = append(spec.Activity, list...)
+		case string:
+			if strings.TrimSpace(list) != "" {
+				spec.Activity = []string{strings.TrimSpace(list)}
+			}
 		}
 		return spec, spec.Run != nil || spec.Restricted != nil || spec.Ping != nil || spec.Skills != ""
 	default:

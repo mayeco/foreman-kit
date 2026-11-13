@@ -85,6 +85,13 @@ outage: # every agent of a role is out: a usage limit, a lost login
 #   run         a call while permissions is full
 #   restricted  a call while permissions is restricted
 #   ping        the preflight's ping (the run command when there is none)
+#   detached    true when the CLI hands each call to a service outside the process the kit
+#               starts (a gateway, a background server): killing that process does not stop the
+#               work. A detached agent holds a role only with a stop command
+#   stop        the command that stops one call of a detached agent: {{workdir}}, and {{pid}}
+#               (the process the kit ran)
+#   activity    files a detached agent writes as it works (its session store): a change of one
+#               is activity of its call for the idle watchdog
 # Placeholders:
 #   {{prompt}}       the prompt, as one argument
 #   {{prompt_file}}  the path of a file that holds the prompt
@@ -143,6 +150,7 @@ commands:
   hermes:
     run: hermes -z {{prompt}} --yolo --accept-hooks {{args}}
     ping: hermes -z {{prompt}} {{args}}
+    detached: true
   kilo:
     run: kilo run --agent code --auto {{args}} {{prompt}}
     restricted: kilo run --agent code {{args}} {{prompt}}
@@ -152,8 +160,8 @@ commands:
     restricted: omp -p --no-session {{args}} {{prompt}}
     ping: omp -p --no-session {{args}} {{prompt}}
   opencode:
-    run: opencode run --format json {{args}} {{prompt}}
-    ping: opencode run {{args}} {{prompt}}
+    run: opencode run --standalone --format json {{args}} {{prompt}}
+    ping: opencode run --standalone {{args}} {{prompt}}
   pi:
     run: pi -p --no-session --approve {{args}} -- {{prompt}}
     restricted: pi -p --no-session --no-approve {{args}} -- {{prompt}}

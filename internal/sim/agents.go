@@ -36,6 +36,10 @@ var SimulatedAgents = []string{
 	"sim-agent-gives-up",
 	"sim-agent-enospc",
 	"sim-agent-reorder",
+	// Detached personas: the client of a gateway whose work goes on in a service outside the call's
+	// process group (see fault-agent-detached-gateway).
+	"sim-agent-detached",
+	"sim-agent-detached-hang",
 }
 
 // InstallSimulatedAgentBinaries writes all fake agent executables into binDir.
@@ -362,8 +366,50 @@ if [ "$ROLE" = "plan" ]; then
   exit 0
 fi
 
+# The state directory of a detached persona's service: --state <dir> in its command.
+detached_state() {
+  local prev=""
+  for arg in "$@"; do
+    if [ "$prev" = "--state" ]; then printf '%s' "$arg"; return; fi
+    prev="$arg"
+  done
+}
+
+# start_service <state> <script>: runs script in a session of its own, out of the call's process
+# group, with its current directory in the work tree (what a gateway's shell commands do).
+start_service() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -MPOSIX -e 'POSIX::setsid(); exec "bash", "-c", $ARGV[0]' "$2" </dev/null >"$1/service.log" 2>&1 &
+  else
+    nohup bash -c "$2" </dev/null >"$1/service.log" 2>&1 &
+  fi
+}
+
 # BUILD phase personas
 case "$EFFECTIVE" in
+  sim-agent-detached)
+    # A gateway's client: the work goes on in a service of its own session, which records progress in
+    # an activity file outside the work tree for six seconds, then builds like sim-agent-clean. The
+    # client prints nothing and waits.
+    STATE="$(detached_state "$@")"
+    mkdir -p "$STATE"
+    rm -f "$STATE/done"
+    start_service "$STATE" "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo progress \$i >> '$STATE/activity'; sleep 0.5; done; sim-agent-clean; echo \$? > '$STATE/done'"
+    while [ ! -s "$STATE/done" ]; do sleep 1; done
+    rc="$(cat "$STATE/done")"
+    rm -f "$STATE/done"
+    exit "$rc"
+    ;;
+
+  sim-agent-detached-hang)
+    # A gateway's client whose service hangs in the work tree: killing the client stops nothing; only
+    # the agent's stop command ends the service.
+    STATE="$(detached_state "$@")"
+    mkdir -p "$STATE"
+    start_service "$STATE" "echo \$\$ > '$STATE/service.pid'; exec sleep 86398"
+    exec sleep 86397
+    ;;
+
   sim-agent-crash-midway)
     # Writes half of the feature (code, no test, tasks unchecked) and dies by SIGKILL.
     safe_id="$(printf '%s' "$CHANGE" | tr -c 'a-zA-Z0-9' '_')"

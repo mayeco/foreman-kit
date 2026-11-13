@@ -447,6 +447,23 @@ func AgentExec(ctx context.Context, opts AgentExecOptions) (*AgentExecResult, er
 				}
 			}
 
+			// A call of a detached agent the kit stopped here may still be working: no call starts in
+			// this directory until its processes end.
+			if rc == 0 {
+				if left := waitForStoppedCall(ctx, workdir, opts.GracePeriod, opts.WatchdogPoll); len(left) > 0 {
+					msg := workdirBusyMessage(workdir, left)
+					_, _ = io.WriteString(attemptBufWriter(&attemptBuf, stderr), msg)
+					combinedOut.WriteString(msg)
+					rc = ExitWorkdirBusy
+				}
+			}
+
+			var detachedSpec config.AgentCommandSpec
+			if engine != "stub" {
+				detachedSpec, _, _ = config.CommandsFor(appRoot, engine)
+			}
+			runPID := 0
+
 			if rc == 0 {
 				extra := config.ExtraArgsForRole(appRoot, engine, argsRole, stderr)
 				if len(extra) > 0 {
@@ -527,6 +544,7 @@ func AgentExec(ctx context.Context, opts AgentExecOptions) (*AgentExecResult, er
 						WatchdogPoll:   opts.WatchdogPoll,
 						Store:          st,
 						ExecID:         opts.ExecID,
+						ActivityPaths:  activityPathsOf(detachedSpec),
 					}, binName, binArgs...)
 					if runErr != nil {
 						// The engine never ran (its file cannot be executed, the prompt is too large an
@@ -541,6 +559,7 @@ func AgentExec(ctx context.Context, opts AgentExecOptions) (*AgentExecResult, er
 						rc = runRes.ExitCode
 						idleStalled = runRes.IdleStalled
 						idleSeconds = runRes.IdleSeconds
+						runPID = runRes.PID
 					} else {
 						rc = 1
 					}
@@ -554,6 +573,12 @@ func AgentExec(ctx context.Context, opts AgentExecOptions) (*AgentExecResult, er
 				if rc == 0 {
 					rc = ExitTimeout
 				}
+			}
+
+			// Killing the process of a detached agent does not stop its work, which goes on in a service
+			// outside it: its stop command does, and no other call starts here until it has.
+			if detachedSpec.Detached && runPID > 0 && rc != 0 && stoppedByKit(attemptCtx, rc, idleStalled) {
+				stopDetachedCall(attemptCtx, detachedSpec, engine, workdir, runPID, attemptBufWriter(&attemptBuf, io.MultiWriter(stderr, &combinedOut)))
 			}
 
 			exitLine := fmt.Sprintf("agent_exec: engine %s exited %d\n", engine, rc)
@@ -572,6 +597,9 @@ func AgentExec(ctx context.Context, opts AgentExecOptions) (*AgentExecResult, er
 						Status:    "ok",
 					})
 				}
+				break
+			}
+			if rc == ExitWorkdirBusy {
 				break
 			}
 			if rc == ExitNotInstalled {
@@ -682,7 +710,7 @@ func AgentExec(ctx context.Context, opts AgentExecOptions) (*AgentExecResult, er
 			}
 		}
 
-		if rc == 0 || ctx.Err() != nil {
+		if rc == 0 || rc == ExitWorkdirBusy || ctx.Err() != nil {
 			break
 		}
 		if i+1 < len(arranged) {

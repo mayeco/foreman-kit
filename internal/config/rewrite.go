@@ -345,6 +345,15 @@ func renderCommands(commands map[string]any, order []string) string {
 		if spec.StdinNull != nil {
 			b.WriteString(fmt.Sprintf("    stdin_null: %t\n", *spec.StdinNull))
 		}
+		if spec.Detached {
+			b.WriteString("    detached: true\n")
+		}
+		if spec.Stop != nil {
+			b.WriteString(renderCommand("    ", "stop", spec.Stop))
+		}
+		if len(spec.Activity) > 0 {
+			b.WriteString("    activity: " + inlineYAML(spec.Activity, nil) + "\n")
+		}
 	}
 	return b.String()
 }

@@ -48,6 +48,8 @@ var RETRYABLE_REASONS = []string{
 	"transient_error",
 	"environment_hold",
 	"environment_unavailable",
+	// A call of a detached agent the kit stopped still works in the worktree; it ends on its own.
+	"worktree_busy",
 }
 
 // SYSTEM_REASONS lists system/framework failure reasons that pause the pipeline on first occurrence.
@@ -68,6 +70,9 @@ const (
 	// migration applied there would make the base look broken).
 	BaseCheckSlot       = 96
 	EnginesDownExitCode = 75
+	// WorkdirBusyExitCode is the exit of an agent call that did not start because processes of a
+	// stopped detached call still work in its worktree.
+	WorkdirBusyExitCode = proc.ExitWorkdirBusy
 )
 
 // Merger state machine states stored in merge_attempts.state.

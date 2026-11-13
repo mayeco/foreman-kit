@@ -592,7 +592,7 @@ func build() []Setting {
 			Key:     AgentCommands,
 			Kind:    KindCommands,
 			Default: map[string]any{},
-			Means:   "the commands that run each agent, exactly as written: the kit adds nothing to them. agent => run (" + AgentPermissions.Path() + ": full), restricted (" + AgentPermissions.Path() + ": restricted) and ping (the preflight), each a string split as a shell would split it, or a list. Placeholders: {{prompt}}, {{prompt_file}}, {{workdir}}, {{timeout}} (the role's timeout, in seconds) and {{args}} (the role's args)",
+			Means:   "the commands that run each agent, exactly as written: the kit adds nothing to them. agent => run (" + AgentPermissions.Path() + ": full), restricted (" + AgentPermissions.Path() + ": restricted) and ping (the preflight), each a string split as a shell would split it, or a list. Placeholders: {{prompt}}, {{prompt_file}}, {{workdir}}, {{timeout}} (the role's timeout, in seconds) and {{args}} (the role's args). An agent whose CLI hands each call to a service outside the process the kit starts is detached: true, holds a role only with a stop command ({{workdir}}, {{pid}}), and lists in activity the files it writes as it works",
 			ReadBy:  "foreman-kit agent-exec and foreman-kit check-engines, on every agent call and preflight ping",
 			Change:  "edit " + AgentCommands.FilePath() + " by hand under commands, then run check; foreman-kit update --agents LIST writes the commands of an agent it adds",
 		},

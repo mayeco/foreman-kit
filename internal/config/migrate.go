@@ -119,7 +119,12 @@ func (c *configData) needsRewrite(name string) bool {
 		return true
 	}
 	r := (&settings.Reader{Root: c.root, FilesAlone: true}).Use(name, data)
-	return len(r.Problems(name)) > 0 || (name == settings.Agents.File() && formerCommands(data))
+	for _, p := range r.Problems(name) {
+		if !p.Choice {
+			return true
+		}
+	}
+	return name == settings.Agents.File() && (formerCommands(data) || formerShippedCommands(data))
 }
 
 // formerCommands reports whether the commands of .foreman-kit/agents.yaml are still written the way they
@@ -139,6 +144,50 @@ func formerCommands(data map[string]any) bool {
 			if text, isText := command.(string); isText && formerPlaceholderRe.MatchString(text) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// earlierShippedCommands are the commands an earlier foreman-kit shipped for an agent whose shipped
+// commands changed since. An application whose file still holds one of them exactly, as the kit
+// wrote it, gets the commands shipped today from `foreman-kit update`; one a person edited is kept.
+var earlierShippedCommands = map[string][]AgentCommandSpec{
+	// Before hermes was declared detached (its CLI hands each call to the hermes gateway).
+	"hermes": {{Run: "hermes -z {{prompt}} --yolo --accept-hooks {{args}}", Ping: "hermes -z {{prompt}} {{args}}"}},
+	// Before opencode ran with a private server (--standalone) instead of its background service.
+	"opencode": {{Run: "opencode run --format json {{args}} {{prompt}}", Ping: "opencode run {{args}} {{prompt}}"}},
+}
+
+// earlierShipped reports whether raw, the commands of agent name, are exactly ones an earlier
+// foreman-kit shipped (earlierShippedCommands) and differ from the ones it ships now.
+func earlierShipped(name string, raw any) bool {
+	spec, ok := ParseCommandSpec(raw)
+	if !ok || spec.Detached || spec.Stop != nil || len(spec.Activity) > 0 || spec.Skills != "" || spec.Tool != "" {
+		return false
+	}
+	text := func(command any) string {
+		if command == nil {
+			return ""
+		}
+		return strings.TrimSpace(fmt.Sprint(command))
+	}
+	for _, old := range earlierShippedCommands[name] {
+		if text(spec.Run) == text(old.Run) && text(spec.Restricted) == text(old.Restricted) && text(spec.Ping) == text(old.Ping) &&
+			(spec.StdinNull == nil) == (old.StdinNull == nil) {
+			return true
+		}
+	}
+	return false
+}
+
+// formerShippedCommands reports whether the commands of .foreman-kit/agents.yaml hold, for some agent,
+// commands an earlier foreman-kit shipped (earlierShipped).
+func formerShippedCommands(data map[string]any) bool {
+	commands, _ := data["commands"].(map[string]any)
+	for name, raw := range commands {
+		if earlierShipped(name, raw) {
+			return true
 		}
 	}
 	return false
@@ -271,6 +320,11 @@ func (c *configData) rewrite(f settings.File) ([]byte, []string, error) {
 	}
 	r := (&settings.Reader{Root: c.root, FilesAlone: true}).Use(f.Name, written)
 	for _, p := range r.Problems(f.Name) {
+		if p.Choice {
+			// Well written, and a person's to choose: noted, not a failure of the rewrite.
+			notes = append(notes, "  REVIEW: "+p.Text)
+			continue
+		}
 		return nil, nil, fmt.Errorf("the file written still has a problem: %s", p.Text)
 	}
 	return text, notes, nil
@@ -564,7 +618,8 @@ func (c *configData) migratedCommands(values map[settings.Key]any) (map[string]a
 		spec, parsed := ParseCommandSpec(raw)
 		shipped, known := ShippedCommands(name)
 		bare, isBare := raw.(string)
-		untouched := !has || !parsed || (isBare && strings.TrimSpace(bare) == formerCommandTemplates[name])
+		earlier := has && earlierShipped(name, raw)
+		untouched := !has || !parsed || (isBare && strings.TrimSpace(bare) == formerCommandTemplates[name]) || earlier
 		if untouched {
 			if !known {
 				continue
@@ -575,7 +630,10 @@ func (c *configData) migratedCommands(values map[settings.Key]any) (map[string]a
 				shipped.Restricted = strings.Replace(fmt.Sprint(shipped.Restricted), from, to, 1)
 				notes = append(notes, fmt.Sprintf("  commands.claude: --max-budget-usd %s is written in its run and restricted commands (was %s in %s)", budget, formerBudgetKey.Path(), formerFilePath(formerBudgetKey)))
 			}
-			if has {
+			switch {
+			case earlier:
+				notes = append(notes, fmt.Sprintf("  commands.%s: the commands an earlier foreman-kit shipped are replaced by the ones it ships now", name))
+			case has:
 				notes = append(notes, fmt.Sprintf("  commands.%s: the commands the binary built for it are written in full, to run exactly as written", name))
 			}
 			out[name] = shipped

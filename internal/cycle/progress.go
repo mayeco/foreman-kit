@@ -138,6 +138,7 @@ func RetryNote(root string, q store.QuarantineRecord) string {
 		"transient_error":         true,
 		"environment_hold":        true,
 		"environment_unavailable": true,
+		"worktree_busy":           true,
 	}
 	if !retryable[q.Reason] {
 		return "needs a human"

@@ -347,9 +347,13 @@ func TestASettingIsChangedFromItsEditor(t *testing.T) {
 	if code, data, raw = set(map[string]any{"key": string(workers.Key), "value": "3"}); code != http.StatusOK || !strings.Contains(asStr(data["output"]), "already") {
 		t.Errorf("setting %s to the value it holds answered %d %s", workers.Key, code, raw)
 	}
-	// The agents of a role are changed too: they are one line of their file.
+	// The agents of a role are one line of their file, checked like the rest of it: hermes, detached
+	// with no stop command, cannot hold a role, and the editor says why.
 	agents := settings.RoleAgents("plan")
-	if code, data, raw = set(map[string]any{"key": string(agents), "value": "hermes, claude"}); code != http.StatusOK || !strings.Contains(asStr(data["output"]), "changed") {
+	if code, _, raw = set(map[string]any{"key": string(agents), "value": "hermes, claude"}); code != http.StatusBadRequest || !strings.Contains(raw, "hermes is detached") {
+		t.Errorf("setting %s to hermes answered %d %s", agents, code, raw)
+	}
+	if code, data, raw = set(map[string]any{"key": string(agents), "value": "claude"}); code != http.StatusOK || !strings.Contains(asStr(data["output"]), "already") {
 		t.Errorf("setting %s answered %d %s", agents, code, raw)
 	}
 

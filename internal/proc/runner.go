@@ -88,7 +88,10 @@ type RunOptions struct {
 	Stderr      io.Writer
 	Timeout     time.Duration
 	GracePeriod time.Duration // WaitDelay before SIGKILL (default 60s)
-	IdleTimeout time.Duration // 0 disables the idle watchdog
+	// ActivityPaths are files whose changes the idle watchdog counts as activity (a detached
+	// agent's session store), besides the process tree, the work directory and the output.
+	ActivityPaths []string
+	IdleTimeout   time.Duration // 0 disables the idle watchdog
 	// IdleCPUPercent is the share of one core, in percent, below which the CPU the command's
 	// processes use is not activity for the idle watchdog (a frozen CLI still wakes up for its
 	// timers); 0 counts any CPU use.
@@ -112,6 +115,8 @@ type RunResult struct {
 	IdleStalled bool
 	IdleSeconds int
 	Duration    time.Duration
+	// PID is the process the command ran as (0 when it never started).
+	PID int
 }
 
 // outputSink is shared by the stdout and stderr collectors of one process. When Stdout and Stderr
@@ -330,14 +335,15 @@ func RunBounded(ctx context.Context, opts RunOptions, name string, args ...strin
 		go func() {
 			defer close(watchDone)
 			WatchIdle(watchCtx, WatchdogConfig{
-				PID:          pid,
-				WorkDir:      workDir,
-				TmpDir:       privateTmpDir(childTmpDir),
-				IdleLimit:    opts.IdleTimeout,
-				PollInterval: opts.WatchdogPoll,
-				CPUPercent:   opts.IdleCPUPercent,
-				OnPoll:       opts.OnIdle,
-				OutputBytes:  func() int64 { return sink.outputBytes.Load() },
+				PID:           pid,
+				WorkDir:       workDir,
+				TmpDir:        privateTmpDir(childTmpDir),
+				IdleLimit:     opts.IdleTimeout,
+				PollInterval:  opts.WatchdogPoll,
+				CPUPercent:    opts.IdleCPUPercent,
+				OnPoll:        opts.OnIdle,
+				OutputBytes:   func() int64 { return sink.outputBytes.Load() },
+				ActivityPaths: opts.ActivityPaths,
 				OnStall: func(stalledSeconds int) {
 					idleSec.Store(int32(stalledSeconds))
 					idleStalled.Store(true)
@@ -372,6 +378,7 @@ func RunBounded(ctx context.Context, opts RunOptions, name string, args ...strin
 	}
 
 	res := &RunResult{
+		PID:      pid,
 		Output:   sink.String(),
 		ExitCode: 0,
 		Duration: time.Since(started),

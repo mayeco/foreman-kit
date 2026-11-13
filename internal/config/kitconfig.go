@@ -791,6 +791,65 @@ func checkCommand(label string, command any) string {
 	return ""
 }
 
+// checkDetachedKeys says what is wrong with the keys of the commands of agent that describe a
+// detached CLI (detached, stop, activity), or "".
+func checkDetachedKeys(agent string, raw any, spec AgentCommandSpec) string {
+	entry, isMap := raw.(map[string]any)
+	if !isMap {
+		return ""
+	}
+	if value, has := entry["detached"]; has {
+		if _, ok := value.(bool); !ok {
+			return fmt.Sprintf("%s.detached: must be true or false (is %v)", agent, value)
+		}
+	}
+	if spec.Stop != nil {
+		if problem := checkStopCommand(agent+".stop", spec.Stop); problem != "" {
+			return problem
+		}
+		if !spec.Detached {
+			return fmt.Sprintf("%s.stop: only a detached agent (detached: true) is stopped with a command; the kit stops any other by killing its processes", agent)
+		}
+	}
+	if value, has := entry["activity"]; has {
+		list, ok := value.([]any)
+		if !ok {
+			return fmt.Sprintf("%s.activity: must be a list of files (is %v)", agent, value)
+		}
+		for _, item := range list {
+			if text, ok := item.(string); !ok || strings.TrimSpace(text) == "" {
+				return fmt.Sprintf("%s.activity: must be a list of files (holds %v)", agent, item)
+			}
+		}
+		if !spec.Detached {
+			return fmt.Sprintf("%s.activity: only the calls of a detached agent (detached: true) are watched through files; the kit watches any other through its processes", agent)
+		}
+	}
+	return ""
+}
+
+// StopPlaceholders are the placeholders of the stop command of a detached agent.
+var StopPlaceholders = []string{"workdir", "pid"}
+
+// checkStopCommand says what is wrong with the stop command of a detached agent, or "".
+func checkStopCommand(label string, command any) string {
+	words, err := CommandWords(command)
+	if err != nil {
+		return fmt.Sprintf("%s: cannot be split as a shell would (%v)", label, err)
+	}
+	if len(words) == 0 || words[0] == "" {
+		return fmt.Sprintf("%s: is empty", label)
+	}
+	for _, word := range words {
+		for _, m := range commandPlaceholderRe.FindAllStringSubmatch(word, -1) {
+			if !slices.Contains(StopPlaceholders, m[1]) {
+				return fmt.Sprintf("%s: {{%s}} is not a placeholder of a stop command (%s)", label, m[1], strings.Join(StopPlaceholders, ", "))
+			}
+		}
+	}
+	return ""
+}
+
 // agentCanBeNamed reports whether a role may name agent: one the kit knows, or one the
 // .foreman-kit/agents.yaml of root gives commands. Whether its CLI is installed is the preflight's to say.
 func agentCanBeNamed(root, agent string) bool {
@@ -859,6 +918,9 @@ func checkSettingTypeProblemWith(r *settings.Reader, root string, setting settin
 				if problem := checkCommand(agent+"."+entry.name, entry.command); problem != "" {
 					return problem
 				}
+			}
+			if problem := checkDetachedKeys(agent, m[agent], spec); problem != "" {
+				return problem
 			}
 		}
 	case settings.KindArgs:

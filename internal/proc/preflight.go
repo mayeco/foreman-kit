@@ -594,6 +594,26 @@ func RunPreflight(ctx context.Context, opts PreflightOptions) (*PreflightResult,
 		}
 	}
 
+	// A detached agent hands each call to a service outside the process the kit starts: it holds a
+	// role only with a stop command, or its calls would keep working after the kit stops them.
+	for _, name := range toProbe {
+		spec, _, known := config.CommandsFor(root, name)
+		if !known || !spec.Detached {
+			continue
+		}
+		if spec.HoldsNoRole() {
+			fmt.Fprintf(stdout, "  %s: detached, no stop command: it holds no role\n", name)
+		} else {
+			fmt.Fprintf(stdout, "  %s: detached, stopped with its stop command\n", name)
+		}
+	}
+	for _, role := range config.RolesOrder {
+		for _, eng := range roleEnginesMap[role] {
+			if spec, _, known := config.CommandsFor(root, eng); known && spec.HoldsNoRole() {
+				fmt.Fprintf(stdout, "  %s: FAIL %s\n", role, settings.DetachedHoldsNoRole(role, eng))
+			}
+		}
+	}
 	fmt.Fprintf(stdout, "  roles: %s\n", strings.Join(rolePairs, " "))
 	fmt.Fprintf(stdout, "  selection: %s\n", config.SelectionTo(root, io.Discard))
 

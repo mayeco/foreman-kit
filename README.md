@@ -108,7 +108,7 @@ A release is a tag `v<semver>` pushed to GitHub (`v4.1.0`; `v4.1.0-rc.1` is a pr
 `.github/workflows/release.yml`:
 
 1. **verify**: `go vet`, the build, every test, the evaluator's contract, the 14 simulations and the
-   23 fault scenarios, with `openspec` and `agent-memory` installed from npm (the tests run them).
+   24 fault scenarios, with `openspec` and `agent-memory` installed from npm (the tests run them).
 2. **GitHub release**: [GoReleaser](https://goreleaser.com) (`.goreleaser.yaml`) builds the static
    binary for macOS and Linux on amd64 and arm64 with the tag's version in it, and uploads each one
    as `foreman-kit-<os>-<arch>` (what `install.sh` downloads) with `checksums.txt`.
@@ -182,7 +182,7 @@ An umbrella workspace holds seven settings files, one per reader. Every key is w
 | `.foreman-kit/exploration.yaml` | What the cycle and the visual session look for | Both |
 | `.foreman-kit/evaluator.yaml` | How the evaluator is called, what each gate asks and what the kit does with the answers | Every gate of the evaluator |
 
-Times carry their unit (`30s`, `15m`, `2h`), and `never` turns off a limit that can be off. `foreman-kit config show` explains every key with its value, `foreman-kit config set <file>.<key> <value>` changes one in place, and `foreman-kit config recommend` lists the ones the kit's own records argue for changing. The command that runs each agent is written whole under `commands:` in `.foreman-kit/agents.yaml` (`run`, `restricted`, `ping`) and runs exactly as written; with `permissions: restricted` an agent without a `restricted` command cannot be used. `foreman-kit update` rewrites the files of a workspace installed with an older kit: each value moves to the key that holds it now, and a key the kit no longer reads is an error from then on. A change that was being built keeps the former files in its worktree: what runs there reads the files of the main checkout, so it goes on with the settings the workspace has now.
+Times carry their unit (`30s`, `15m`, `2h`), and `never` turns off a limit that can be off. `foreman-kit config show` explains every key with its value, `foreman-kit config set <file>.<key> <value>` changes one in place, and `foreman-kit config recommend` lists the ones the kit's own records argue for changing. The command that runs each agent is written whole under `commands:` in `.foreman-kit/agents.yaml` (`run`, `restricted`, `ping`) and runs exactly as written; with `permissions: restricted` an agent without a `restricted` command cannot be used. An agent whose CLI hands each call to a service outside the process the kit starts (the hermes gateway) is declared `detached: true` there: killing that process does not stop its work, so it holds a role only with a `stop` command (`{{workdir}}`, `{{pid}}`), which the kit runs when it stops one of its calls, and no other call starts in that worktree while a process of the stopped one still works there. Its `activity` lists the files it writes as it works (its session store), whose changes the idle watchdog counts as activity. The kit ships hermes as detached, with no stop command (it has none for one session), and runs opencode with `--standalone`, a private server instead of its background service. `foreman-kit update` rewrites the files of a workspace installed with an older kit: each value moves to the key that holds it now, and a key the kit no longer reads is an error from then on. A change that was being built keeps the former files in its worktree: what runs there reads the files of the main checkout, so it goes on with the settings the workspace has now.
 
 ### Child repositories (`repos/<name>/repo.config.yaml`)
 Each child repository describes itself in a file at its own root, committed in that repository: its base branch, how it runs and the commands that check a change to it. `foreman-kit setup repo <name>` writes it from `.foreman-kit/templates/repo.yaml`.
@@ -328,7 +328,7 @@ CGO_ENABLED=0 go test ./...
 # Run the full 14-scenario end-to-end simulation laboratory
 ./bin/foreman-kit sim run /tmp/sim_stack all
 
-# Run the 23 fault-injection scenarios (or one by name; `everything` runs both groups)
+# Run the 24 fault-injection scenarios (or one by name; `everything` runs both groups)
 ./bin/foreman-kit sim run /tmp/sim_stack faults
 ./bin/foreman-kit sim run /tmp/sim_stack fault-git-base-force-pushed
 ```

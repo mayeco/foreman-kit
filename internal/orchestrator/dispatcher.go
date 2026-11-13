@@ -4008,6 +4008,11 @@ func (d *Dispatcher) invokeAgent(ctx context.Context, change, phase, role, engin
 	if res.ExitCode == 127 {
 		return "", NewBlockedError("engine_unavailable", res.Output)
 	}
+	if res.ExitCode == WorkdirBusyExitCode {
+		// A call of a detached agent the kit stopped still works in the worktree: no other starts
+		// over it. Retried once the processes it names have ended.
+		return "", NewBlockedError("worktree_busy", agentErrorLine(res.Output)+"\n\n"+tailLines(res.Output, 40))
+	}
 	if res.ExitCode == EnginesDownExitCode {
 		// agent_outcome: an agent that gave up goes to a human, a broken environment pauses; anything else
 		// (or no decision) is an engine outage the change waits out, as before.

@@ -406,6 +406,9 @@ type Problem struct {
 	// Former says the key is one an older foreman-kit read: the file was written for it, and
 	// `foreman-kit update` rewrites it.
 	Former bool
+	// Choice says the values are each well written and only a person can mend them, by choosing
+	// another (a role that names an agent it cannot hold): rewriting the file changes nothing.
+	Choice bool
 }
 
 func (p Problem) String() string {
@@ -471,6 +474,9 @@ func (r *Reader) Problems(name string) []Problem {
 			continue
 		}
 		out = append(out, Problem{File: f.Path, Key: key, Text: key.Path() + ": not a setting of this file (a typo?)"})
+	}
+	if name == AgentCommands.File() {
+		out = append(out, detachedRoleProblems(f.Path, fd.data)...)
 	}
 	return out
 }

@@ -74,7 +74,7 @@ CGO_ENABLED=0 go test -count=1 ./internal/...
 # 5. Run the 14-scenario end-to-end simulation stack when touching orchestrator/store/cycle/proc/evaluator
 ./bin/foreman-kit sim run /tmp/openspec-sim-stack all
 
-# 6. Run the 23 fault-injection scenarios when touching failure handling (agents, git, merger, evaluator, LLM)
+# 6. Run the 24 fault-injection scenarios when touching failure handling (agents, git, merger, evaluator, LLM)
 ./bin/foreman-kit sim run /tmp/openspec-sim-stack faults
 
 # 7. Open the portal's pages in a headless Chromium when touching its templates, portal.js or page handlers

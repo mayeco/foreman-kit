@@ -36,6 +36,10 @@ type WatchdogConfig struct {
 	// something since the previous poll). It runs on the goroutine of WatchIdle.
 	OnPoll  func(idle time.Duration)
 	OnStall func(stalledSeconds int)
+	// ActivityPaths are files a detached agent writes as it works (its session store, its log): a
+	// change of their size or modification time is activity, because the agent's work happens in a
+	// service outside the watched tree.
+	ActivityPaths []string
 }
 
 // watchdogPoll returns how often WatchIdle looks at a process tree: custom when it is set, otherwise
@@ -96,7 +100,7 @@ func WatchIdle(ctx context.Context, cfg WatchdogConfig) {
 			last = now
 
 			used := meter.used(sampleTreeCPU(cfg.PID))
-			state := ActivityState(ctx, cfg.WorkDir, cfg.TmpDir, outBytes())
+			state := ActivityState(ctx, cfg.WorkDir, cfg.TmpDir, outBytes()) + FilesState(cfg.ActivityPaths)
 			since := tracker.observe(used, state, elapsed)
 			if cfg.OnPoll != nil {
 				cfg.OnPoll(since)
@@ -425,6 +429,38 @@ func TreeState(ctx context.Context, dir string) string {
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// FilesState returns the size and modification time of each of paths ("~/" is the home directory),
+// or "" when there are none: what WatchIdle compares from one poll to the next for a detached agent.
+// A path that does not exist (yet) contributes that it does not.
+func FilesState(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, p := range paths {
+		p = ExpandHome(p)
+		if info, err := os.Stat(p); err == nil {
+			fmt.Fprintf(&b, "\x00%s:%d:%d", p, info.Size(), info.ModTime().UnixNano())
+		} else {
+			fmt.Fprintf(&b, "\x00%s:-", p)
+		}
+	}
+	return b.String()
+}
+
+// ExpandHome returns p with a leading "~/" (or a lone "~") replaced by the home directory.
+func ExpandHome(p string) string {
+	p = strings.TrimSpace(p)
+	if p != "~" && !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
 }
 
 // privateTmpDir returns tmpDir, the TMPDIR a command runs with, when the command has that directory to

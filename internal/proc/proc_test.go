@@ -54,9 +54,9 @@ func setupProcTestWorkspace(t *testing.T) (string, *store.Store) {
 		_ = os.WriteFile(dst, b, 0o644)
 	}
 
-	_ = config.Write(root, []string{"claude", "hermes"}, map[string][]string{
-		"plan":  {"claude", "hermes"},
-		"build": {"claude", "hermes"},
+	_ = config.Write(root, []string{"claude", "copilot"}, map[string][]string{
+		"plan":  {"claude", "copilot"},
+		"build": {"claude", "copilot"},
 		"cycle": {"claude"},
 	}, "in_order")
 
@@ -385,7 +385,7 @@ func TestPreflightWithMockJevAndConcurrentAgentPings(t *testing.T) {
 	// Create fake git, openspec, claude, hermes on PATH
 	binDir := filepath.Join(t.TempDir(), "bin")
 	_ = os.MkdirAll(binDir, 0o755)
-	for _, name := range []string{"openspec", "claude", "hermes"} {
+	for _, name := range []string{"openspec", "claude", "hermes", "copilot"} {
 		script := "#!/usr/bin/env bash\necho '" + name + " 1.0.0 pong'\nexit 0\n"
 		_ = os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o755)
 	}
@@ -409,7 +409,7 @@ func TestPreflightWithMockJevAndConcurrentAgentPings(t *testing.T) {
 
 	lockData := map[string]any{
 		"version": assets.Version,
-		"agents":  []string{"claude", "hermes"},
+		"agents":  []string{"claude", "copilot"},
 		"files": map[string]any{
 			firstSkillRel: map[string]any{
 				"class":  "kit",
@@ -678,7 +678,7 @@ func TestPreflightGitVersionCheck(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"openspec", "claude", "hermes"} {
+	for _, name := range []string{"openspec", "claude", "hermes", "copilot"} {
 		script := "#!/usr/bin/env bash\necho '" + name + " 1.0.0 pong'\nexit 0\n"
 		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)

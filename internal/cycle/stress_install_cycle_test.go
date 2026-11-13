@@ -1869,8 +1869,8 @@ func TestStressScenarios_G_H_P(t *testing.T) {
 
 	ws := filepath.Join(workRoot, "ws")
 	if err := Init(ctx, ws, KitOptions{
-		Agents: "claude,hermes",
-		Roles:  map[string]string{"plan": "claude", "build": "claude", "cycle": "hermes"},
+		Agents: "claude,codex",
+		Roles:  map[string]string{"plan": "claude", "build": "claude", "cycle": "codex"},
 	}, io.Discard); err != nil {
 		t.Fatalf("Init ws failed: %v", err)
 	}
@@ -1901,8 +1901,8 @@ func TestStressScenarios_G_H_P(t *testing.T) {
 	err := RunCycle(ctx, ws, st, CycleOptions{
 		Stamp: "20261108T170500Z",
 		AgentExecFunc: func(ctx context.Context, workdir, pf, engine string, timeout time.Duration, out io.Writer) error {
-			if engine != "hermes" {
-				t.Fatalf("G2: expected cycle engine=hermes from .foreman-kit/agents.yaml, got %s", engine)
+			if engine != "codex" {
+				t.Fatalf("G2: expected cycle engine=codex from .foreman-kit/agents.yaml, got %s", engine)
 			}
 			return WriteProposals(workdir, []map[string]any{
 				{

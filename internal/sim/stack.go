@@ -402,6 +402,35 @@ func RunScenario(ctx context.Context, stackDir, scenario string, out io.Writer) 
 	return []ScenarioResult{res}, err
 }
 
+// inheritedAgentEnv lists the variables a pipeline agent receives that describe its own run; a
+// simulation started from inside that agent must not see them.
+var inheritedAgentEnv = []string{
+	"FOREMANKIT_WORKDIR",
+	"FOREMANKIT_MAIN_ROOT",
+	"FOREMANKIT_CHANGE",
+	"FOREMANKIT_PHASE",
+	"FOREMANKIT_ROLE",
+	"FOREMANKIT_ENGINE",
+	"FOREMANKIT_PROMPT_FILE",
+	"FOREMANKIT_SET",
+}
+
+// scrubInheritedAgentEnv unsets inheritedAgentEnv and returns the function that restores it.
+func scrubInheritedAgentEnv() (restore func()) {
+	inherited := map[string]string{}
+	for _, k := range inheritedAgentEnv {
+		if v, ok := os.LookupEnv(k); ok {
+			inherited[k] = v
+			_ = os.Unsetenv(k)
+		}
+	}
+	return func() {
+		for k, v := range inherited {
+			_ = os.Setenv(k, v)
+		}
+	}
+}
+
 func runSingleScenario(ctx context.Context, stackDir, name string, out io.Writer) (ScenarioResult, error) {
 	start := time.Now()
 	st, err := OpenStack(stackDir)
@@ -420,6 +449,10 @@ func runSingleScenario(ctx context.Context, stackDir, name string, out io.Writer
 	_ = os.Setenv("GIT_CONFIG_COUNT", "1")
 	_ = os.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
 	_ = os.Setenv("GIT_CONFIG_VALUE_0", "always")
+	// A simulation run from inside a pipeline agent (a build's gates) inherits that agent's
+	// variables; they name the real worktree, change and phase, so the stack's agents would
+	// write into the real umbrella and record the wrong change. The stack runs without them.
+	defer scrubInheritedAgentEnv()()
 	defer func() {
 		_ = os.Setenv("PATH", origPath)
 		_ = os.Setenv("FOREMANKIT_DB_PATH", origDB)

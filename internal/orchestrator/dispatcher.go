@@ -196,7 +196,7 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 			return nil, err
 		}
 	}
-	if err := judge.Policy().RequireAPIKeyForActiveGates(); err != nil && opts.Judge == nil && !opts.DryRun {
+	if err := judge.Policy().RequireAPIKeyForActiveGates(); err != nil && opts.Judge == nil && !opts.DryRun && gitx.CheckVersion(context.Background()) == nil {
 		// The fix may already be on origin (the gates turned off, pushed from another clone): the main
 		// checkout is only fast-forwarded once a dispatcher runs, so without this a daemon would refuse
 		// every 10 s forever on a policy nobody holds any more.
@@ -431,6 +431,10 @@ func (d *Dispatcher) worktreeBase() string {
 // DryRun inspects the backlog, locks, ready queue, and quarantine state without modifying anything,
 // returning a DryRunReport explaining what is ready, building, merging, blocked, held, or waiting.
 func (d *Dispatcher) DryRun(ctx context.Context) (*DryRunReport, error) {
+	if err := gitx.CheckVersion(ctx); err != nil {
+		d.logf("dispatcher: %v", err)
+		return nil, fmt.Errorf("dispatcher: %w", err)
+	}
 	d.loadPersistedState(ctx)
 	d.fetchOriginQuiet(ctx)
 	archived := d.computeArchivedOnBase(ctx)
@@ -734,12 +738,12 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		}
 		return nil
 	}
-	if why := d.cfg().waits(); why != "" {
-		return errors.New("dispatcher: " + why)
-	}
 	if err := gitx.CheckVersion(ctx); err != nil {
 		d.logf("dispatcher: %v", err)
 		return fmt.Errorf("dispatcher: %w", err)
+	}
+	if why := d.cfg().waits(); why != "" {
+		return errors.New("dispatcher: " + why)
 	}
 
 	d.loadPersistedState(ctx)
@@ -1088,12 +1092,12 @@ func (d *Dispatcher) pass(ctx context.Context) passResult {
 // the caller retries later.
 func (d *Dispatcher) Serve(ctx context.Context) error {
 	pid := os.Getpid()
-	if why := d.cfg().waits(); why != "" {
-		return errors.New("dispatcher: " + why)
-	}
 	if err := gitx.CheckVersion(ctx); err != nil {
 		d.logf("dispatcher: %v", err)
 		return fmt.Errorf("dispatcher: %w", err)
+	}
+	if why := d.cfg().waits(); why != "" {
+		return errors.New("dispatcher: " + why)
 	}
 	d.loadPersistedState(ctx)
 	d.stateMu.Lock()

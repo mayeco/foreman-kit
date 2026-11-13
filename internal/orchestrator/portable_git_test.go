@@ -120,6 +120,39 @@ func TestDispatcherAndMergerRefuseOldGitAtStart(t *testing.T) {
 			}
 		}
 	}
+
+	// Also verify unreadable git version fails in Dispatcher.Run and Merger.Run.
+	unreadableDir := filepath.Join(tmp, "bin-unreadable")
+	if err := os.MkdirAll(unreadableDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unreadableGit := filepath.Join(unreadableDir, "git")
+	if err := os.WriteFile(unreadableGit, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", unreadableDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	dispLog.Reset()
+	if err := disp.Run(ctx); err == nil {
+		t.Fatal("expected Dispatcher.Run to fail when git version cannot be read")
+	} else {
+		for _, want := range []string{"cannot be read", gitx.MinVersion, unreadableGit} {
+			if !strings.Contains(err.Error(), want) || !strings.Contains(dispLog.String(), want) {
+				t.Fatalf("expected Dispatcher.Run error (%v) and log (%q) to contain %q", err, dispLog.String(), want)
+			}
+		}
+	}
+
+	mergerLog.Reset()
+	if err := merger.Run(ctx); err == nil {
+		t.Fatal("expected Merger.Run to fail when git version cannot be read")
+	} else {
+		for _, want := range []string{"cannot be read", gitx.MinVersion, unreadableGit} {
+			if !strings.Contains(err.Error(), want) || !strings.Contains(mergerLog.String(), want) {
+				t.Fatalf("expected Merger.Run error (%v) and log (%q) to contain %q", err, mergerLog.String(), want)
+			}
+		}
+	}
 }
 
 func TestDispatcherChildPreparationRebuildAndGitlinkKeepingUsePortableGitCommands(t *testing.T) {

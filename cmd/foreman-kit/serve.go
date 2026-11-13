@@ -61,8 +61,14 @@ func runHere(ctx context.Context, cmd *cobra.Command, stdout, stderr io.Writer, 
 
 	// The first Ctrl+C stops the daemon as `daemon stop` would: it stops its agents and waits for
 	// its loops. A second one, while it waits, ends the process at once.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+		}
 		fmt.Fprintln(stderr, "\nforeman-kit: stopping: the agents are being stopped and the loops are ending (Ctrl+C again to quit at once)")
 		signal.Reset(shutdownSignals()...)
 	}()

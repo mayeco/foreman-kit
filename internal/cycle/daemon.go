@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mayeco/foreman-kit/internal/gitx"
 	"github.com/mayeco/foreman-kit/internal/proc"
 	"github.com/mayeco/foreman-kit/internal/settings"
 	"github.com/mayeco/foreman-kit/internal/store"
@@ -169,6 +170,11 @@ func StartDaemon(ctx context.Context, root string, st *store.Store, opts DaemonO
 			fmt.Fprintf(stdout, "daemon: already running (pid=%d%s log=%s)\n", dl.PID, webNote, store.RuntimePath(root, "daemon.log"))
 			return 0
 		}
+	}
+
+	if err := gitx.CheckVersion(ctx); err != nil {
+		fmt.Fprintf(stderr, "daemon: %v\n", err)
+		return 1
 	}
 
 	// The daemon reads its file once, when it starts: it does not start on one it cannot use. What
@@ -1090,6 +1096,10 @@ func RunDaemonCLI(ctx context.Context, root string, st *store.Store, baseOpts Da
 		// what it read when it started.
 		if why := daemonFileUnusable(root); why != "" {
 			fmt.Fprintf(stderr, "daemon: %s: not restarted, and the daemon that is running was left as it is\n", why)
+			return 1
+		}
+		if err := gitx.CheckVersion(ctx); err != nil {
+			fmt.Fprintf(stderr, "daemon: %v\n", err)
 			return 1
 		}
 		_ = StopDaemon(ctx, root, st, stdout, stderr)

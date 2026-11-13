@@ -549,13 +549,13 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 		fmt.Fprintf(out, "cycle: paused (%s)\n", reason)
 		return nil
 	}
-	// A cycle syncs with, rebases onto and pushes to the base branch, and judges with what its files
-	// say: without a base branch, or with a file it cannot use, it does not run.
-	if err := RequireUsable(root, settings.CycleFiles...); err != nil {
+	if err := gitx.CheckVersion(ctx); err != nil {
 		fmt.Fprintf(out, "cycle: %v\n", err)
 		return err
 	}
-	if err := gitx.CheckVersion(ctx); err != nil {
+	// A cycle syncs with, rebases onto and pushes to the base branch, and judges with what its files
+	// say: without a base branch, or with a file it cannot use, it does not run.
+	if err := RequireUsable(root, settings.CycleFiles...); err != nil {
 		fmt.Fprintf(out, "cycle: %v\n", err)
 		return err
 	}

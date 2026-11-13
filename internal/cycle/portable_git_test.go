@@ -3,6 +3,7 @@ package cycle
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -164,5 +165,104 @@ func TestRunCycleRefusesOldGitAtStart(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(root, ".worktrees")); !os.IsNotExist(statErr) {
 		t.Fatalf("expected no .worktrees to be created, stat err=%v", statErr)
+	}
+
+	var cliOut, cliErr bytes.Buffer
+	if rc := RunCycleCLI(ctx, root, st, CycleOptions{Stamp: "20261112T120001Z"}, nil, &cliOut, &cliErr); rc == 0 {
+		t.Fatalf("expected RunCycleCLI to return non-zero on git 2.16.6")
+	} else {
+		combined := cliOut.String() + cliErr.String()
+		for _, want := range []string{"2.16.6", gitx.MinVersion, fakeGit} {
+			if !strings.Contains(combined, want) {
+				t.Fatalf("expected RunCycleCLI output %q to contain %q", combined, want)
+			}
+		}
+	}
+}
+
+func TestStartDaemonRefusesOldAndUnreadableGitBeforeLockAndPortal(t *testing.T) {
+	ctx := context.Background()
+	origPath := os.Getenv("PATH")
+
+	for _, tc := range []struct {
+		name      string
+		script    string
+		wantParts []string
+	}{
+		{
+			name:      "2.16.6 below minimum",
+			script:    "#!/bin/sh\nprintf 'git version 2.16.6\\n'\nexit 0\n",
+			wantParts: []string{"2.16.6", gitx.MinVersion},
+		},
+		{
+			name:      "unreadable version",
+			script:    "#!/bin/sh\nprintf 'not a version line\\n'\nexit 0\n",
+			wantParts: []string{"cannot be read", gitx.MinVersion},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			root := filepath.Join(tmp, "umbrella")
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			settingstest.WriteFiles(t, root, nil)
+			settingstest.Give(t, settings.BaseBranch, "master")
+
+			binDir := filepath.Join(tmp, "bin")
+			if err := os.MkdirAll(binDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			fakeGit := filepath.Join(binDir, "git")
+			if err := os.WriteFile(fakeGit, []byte(tc.script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
+
+			st, err := store.OpenAt(filepath.Join(tmp, "state.db"), "ws-daemon-old-git", root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+
+			for _, detach := range []bool{true, false} {
+				called := false
+				var out, errOut bytes.Buffer
+				rc := StartDaemon(ctx, root, st, DaemonOptions{
+					Detach: detach,
+					Web:    true,
+					WebSet: true,
+					Started: func(string, string) {
+						called = true
+					},
+					StartWebFunc: func(context.Context, string, *store.Store, string, int, bool) (string, func(context.Context) error, error) {
+						called = true
+						return "http://127.0.0.1:4567", func(context.Context) error { return nil }, nil
+					},
+					ServeMergerFunc: func(context.Context, string, io.Writer) error {
+						called = true
+						return nil
+					},
+					ServeDispatcherFunc: func(context.Context, string, io.Writer) error {
+						called = true
+						return nil
+					},
+				}, &out, &errOut)
+				if rc == 0 {
+					t.Fatalf("detach=%v: expected StartDaemon to exit non-zero, got 0 (stdout=%q stderr=%q)", detach, out.String(), errOut.String())
+				}
+				if called {
+					t.Fatalf("detach=%v: expected StartDaemon to fail before starting portal or calling Started", detach)
+				}
+				if dl, _ := st.GetLock(ctx, "daemon"); dl != nil {
+					t.Fatalf("detach=%v: expected no daemon lock to be acquired, got %+v", detach, dl)
+				}
+				for _, want := range append(tc.wantParts, fakeGit) {
+					if !strings.Contains(errOut.String(), want) {
+						t.Fatalf("detach=%v: expected stderr %q to contain %q", detach, errOut.String(), want)
+					}
+				}
+			}
+		})
 	}
 }

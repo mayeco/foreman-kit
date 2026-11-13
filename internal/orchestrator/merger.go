@@ -189,12 +189,12 @@ func (m *Merger) integrationWorktree() string {
 
 // Run acquires the merger lock, recovers any interrupted state, and processes the ready queue.
 func (m *Merger) Run(ctx context.Context) error {
-	if why := m.settings.MergerWaits(); why != "" {
-		return errors.New("merger: " + why)
-	}
 	if err := gitx.CheckVersion(ctx); err != nil {
 		m.logf("merger: %v", err)
 		return fmt.Errorf("merger: %w", err)
+	}
+	if why := m.settings.MergerWaits(); why != "" {
+		return errors.New("merger: " + why)
 	}
 	leaseTTL := m.settings.LocksStaleAfter
 	_, err := m.store.AcquireLock(ctx, "merger", store.LockOptions{
@@ -264,12 +264,12 @@ func (m *Merger) Run(ctx context.Context) error {
 // retries later, so two mergers never run at once.
 func (m *Merger) Serve(ctx context.Context) error {
 	pid := os.Getpid()
-	if why := m.settings.MergerWaits(); why != "" {
-		return errors.New("merger: " + why)
-	}
 	if err := gitx.CheckVersion(ctx); err != nil {
 		m.logf("merger: %v", err)
 		return fmt.Errorf("merger: %w", err)
+	}
+	if why := m.settings.MergerWaits(); why != "" {
+		return errors.New("merger: " + why)
 	}
 	ttl := m.settings.LocksStaleAfter
 	if _, err := m.store.AcquireLock(ctx, "merger", store.LockOptions{
@@ -1710,6 +1710,9 @@ type CoordinatedOptions struct {
 // A process-local Hub links the two: a change marked ready is merged at once, and a change whose
 // dependency was just integrated starts at once, so the poll intervals are only a safety net.
 func RunCoordinated(ctx context.Context, opts CoordinatedOptions) error {
+	if err := gitx.CheckVersion(ctx); err != nil {
+		return err
+	}
 	root := store.AppRoot(opts.Root)
 	st := opts.Store
 	if st == nil {
@@ -1874,6 +1877,9 @@ func RunDispatchCLI(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := parseCLIArgs(fs, args); err != nil {
 		return err
 	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		return err
+	}
 
 	disp, err := NewDispatcher(DispatcherOptions{
 		Root:           root,
@@ -1947,6 +1953,9 @@ func RunMergeCLI(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	intervalSeconds, ok := cliSeconds(*interval)
 	if !ok || intervalSeconds <= 0 {
 		return fmt.Errorf("--interval takes a time with its unit (10s, 1m), not %q", *interval)
+	}
+	if err := gitx.CheckVersion(ctx); err != nil {
+		return err
 	}
 
 	merger, err := NewMerger(MergerOptions{

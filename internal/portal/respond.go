@@ -30,17 +30,17 @@ func answerOf(err error) answer {
 	case errors.As(err, &p):
 		switch p.kind {
 		case notFoundProblem:
-			return answer{http.StatusNotFound, "not_found", sentence(p.message)}
+			return answer{http.StatusNotFound, "not_found", sentence(p.message, p.keepFirst)}
 		case conflictProblem:
-			return answer{http.StatusConflict, "conflict", sentence(p.message)}
+			return answer{http.StatusConflict, "conflict", sentence(p.message, p.keepFirst)}
 		case forbiddenProblem:
-			return answer{http.StatusForbidden, "forbidden", sentence(p.message)}
+			return answer{http.StatusForbidden, "forbidden", sentence(p.message, p.keepFirst)}
 		case methodProblem:
-			return answer{http.StatusMethodNotAllowed, "method_not_allowed", sentence(p.message)}
+			return answer{http.StatusMethodNotAllowed, "method_not_allowed", sentence(p.message, p.keepFirst)}
 		case rateLimitedProblem:
-			return answer{http.StatusTooManyRequests, "rate_limited", sentence(p.message)}
+			return answer{http.StatusTooManyRequests, "rate_limited", sentence(p.message, p.keepFirst)}
 		}
-		return answer{http.StatusBadRequest, "invalid_input", sentence(p.message)}
+		return answer{http.StatusBadRequest, "invalid_input", sentence(p.message, p.keepFirst)}
 	case errors.Is(err, store.ErrBadCursor):
 		return answer{http.StatusBadRequest, "invalid_input", "The page cursor is not valid."}
 	}
@@ -48,18 +48,40 @@ func answerOf(err error) answer {
 }
 
 // sentence returns a problem as a person reads it: a service words it the way Go words an error,
-// without a capital or a full stop.
-func sentence(message string) string {
+// without a capital or a full stop. The first rune is upper-cased only when the first word is made
+// of letters (ignoring one trailing ",", ":" or ";") and keepFirst does not say it is an
+// interpolated value: setting keys, change names, paths and other identifiers keep their case.
+func sentence(message string, keepFirst bool) string {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return message
 	}
-	first, size := utf8.DecodeRuneInString(message)
-	message = string(unicode.ToUpper(first)) + message[size:]
+	if !keepFirst && plainWord(message) {
+		first, size := utf8.DecodeRuneInString(message)
+		message = string(unicode.ToUpper(first)) + message[size:]
+	}
 	if last, _ := utf8.DecodeLastRuneInString(message); !strings.ContainsRune(".!?:", last) {
 		message += "."
 	}
 	return message
+}
+
+// plainWord says whether the first word of a message holds only letters, ignoring one trailing
+// ",", ":" or ";".
+func plainWord(message string) bool {
+	word := message
+	if i := strings.IndexFunc(message, unicode.IsSpace); i >= 0 {
+		word = message[:i]
+	}
+	if n := len(word); n > 1 && strings.ContainsRune(",:;", rune(word[n-1])) {
+		word = word[:n-1]
+	}
+	for _, r := range word {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return word != ""
 }
 
 // fail answers a request of the API with an error: {"error": {"code", "message"}}. A failure of the

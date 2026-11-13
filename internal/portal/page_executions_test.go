@@ -398,13 +398,29 @@ func TestAProblemReadsAsASentence(t *testing.T) {
 		"is it running?":                       "Is it running?",
 		"  spaced  ":                           "Spaced.",
 		"":                                     "",
+		"cycle.queue.max_open must be a whole number above 0, not \"0\"": "cycle.queue.max_open must be a whole number above 0, not \"0\".",
+		"nope.x is not a setting":           "nope.x is not a setting.",
+		"probe-e is already in the backlog": "probe-e is already in the backlog.",
+		"/tmp/x is missing":                 "/tmp/x is missing.",
+		"blocked: the gate failed":          "Blocked: the gate failed.",
 	} {
-		if got := sentence(in); got != want {
+		if got := sentence(in, false); got != want {
 			t.Errorf("sentence(%q) = %q, want %q", in, got, want)
 		}
 	}
 	a := answerOf(errConflict("the execution %s is not running: it ended as %s", "run-1", "stopped"))
 	if a.status != http.StatusConflict || a.code != "conflict" || a.message != "The execution run-1 is not running: it ended as stopped." {
 		t.Errorf("answerOf(a conflict) = %+v", a)
+	}
+	// A message that opens with an interpolated value keeps it as it came, even a plain word.
+	if a := answerOf(errConflict("%s is already in the backlog", "probe")); a.message != "probe is already in the backlog." {
+		t.Errorf("answerOf(an identifier first) = %+v", a)
+	}
+	// A message passed through whole is not flagged, and its dotted first word is still kept.
+	if a := answerOf(errInvalid("%s", "nope.x is not a setting")); a.status != http.StatusBadRequest || a.message != "nope.x is not a setting." {
+		t.Errorf("answerOf(a refusal passed through) = %+v", a)
+	}
+	if a := answerOf(errInvalid("%s", "the value is empty")); a.message != "The value is empty." {
+		t.Errorf("answerOf(a plain message passed through) = %+v", a)
 	}
 }

@@ -172,3 +172,171 @@ func TestRenderRepoConfigKeepsShellOperatorsReadable(t *testing.T) {
 		t.Fatalf("setup was rendered as a gate: %#v", cfg.Gates)
 	}
 }
+
+func TestStripGoComments(t *testing.T) {
+	src := "a := \"http://x\" // drop me\nb := `raw // kept`\nc := '/' /* gone\nstill gone */ d\n"
+	got := stripGoComments(src)
+	for _, keep := range []string{`"http://x"`, "`raw // kept`", `'/'`, " d\n"} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("lost %q in %q", keep, got)
+		}
+	}
+	for _, drop := range []string{"drop me", "gone"} {
+		if strings.Contains(got, drop) {
+			t.Errorf("kept comment %q in %q", drop, got)
+		}
+	}
+	if strings.Count(got, "\n") != strings.Count(src, "\n") {
+		t.Errorf("newlines changed: %q", got)
+	}
+}
+
+// goWebRepo writes a net/http Go repository whose main.go holds body.
+func goWebRepo(t *testing.T, files map[string]string) RepoDetection {
+	t.Helper()
+	dir := t.TempDir()
+	files["go.mod"] = "module example.com/a\n\ngo 1.24\n"
+	writeTree(t, dir, files)
+	return DetectRepoStack(dir)
+}
+
+func TestDetectGoPortFromAFlag(t *testing.T) {
+	cases := []struct {
+		name, main, want string
+	}{
+		{"cobra IntVar beats a listen literal", `package main
+import "net/http"
+func main() {
+	cmd.Flags().IntVar(&port, "port", 4567, "portal port")
+	http.ListenAndServe(":9090", nil)
+}`, "4567"},
+		{"cobra shorthand", `package main
+import "net/http"
+func main() { cmd.Flags().IntP("port", "p", 8081, "port"); _ = http.Server{} }`, "8081"},
+		{"flag package beats an env default", `package main
+import ("flag"; "net/http")
+func main() {
+	flag.Int("port", 8082, "port")
+	http.ListenAndServe(":"+envOr("PORT", "4000"), nil)
+}`, "8082"},
+		{"named constant", `package main
+import ("flag"; "net/http")
+const defaultPort = 7070
+func main() { flag.IntVar(&port, "port", defaultPort, "port"); _ = &http.Server{} }`, "7070"},
+		{"grouped constant", `package main
+import ("flag"; "net/http")
+const (
+	name = "x"
+	defaultPort int = 7171
+)
+func main() { flag.IntVar(&port, "port", defaultPort, "port"); _ = &http.Server{} }`, "7171"},
+		{"zero default documented in the usage", `package main
+import "net/http"
+func main() {
+	rootCmd.Flags().IntVar(&rootPort, "port", 0, "TCP port (default 4567)")
+	_ = http.Server{}
+}`, "4567"},
+		{"string flag", `package main
+import "net/http"
+func main() { flag.String("port", "8083", "port"); _ = http.Server{} }`, "8083"},
+		{"example in a comment", `package main
+import "net/http"
+// envOr("PORT", "4000")
+func main() { _ = http.Server{} }`, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			found := goWebRepo(t, map[string]string{"main.go": c.main})
+			if found.Kind != "web" {
+				t.Fatalf("kind = %q, want web", found.Kind)
+			}
+			if found.Port != c.want {
+				t.Fatalf("port = %q, want %q", found.Port, c.want)
+			}
+			if c.want == "" && found.HealthEndpoint != "" {
+				t.Fatalf("health = %q with no port", found.HealthEndpoint)
+			}
+		})
+	}
+}
+
+func TestDetectGoConstantFromTheFlagsPackageOnly(t *testing.T) {
+	found := goWebRepo(t, map[string]string{
+		"cmd/srv/main.go":      "package main\nimport \"net/http\"\nfunc main() { flag.IntVar(&p, \"port\", defaultPort, \"port\"); _ = http.Server{} }\n",
+		"cmd/srv/defaults.go":  "package main\nconst defaultPort = 6060\n",
+		"internal/x/consts.go": "package x\nconst defaultPort = 1111\n",
+	})
+	if found.Port != "6060" {
+		t.Fatalf("port = %q, want 6060", found.Port)
+	}
+}
+
+func TestDetectGoHealthOnlyFromARoute(t *testing.T) {
+	cases := []struct {
+		name, main, want string
+	}{
+		{"comment only", `package main
+import "net/http"
+// mux.HandleFunc("/healthz", h)
+func main() { http.ListenAndServe(":9090", nil) }`, ""},
+		{"string value only", `package main
+import "net/http"
+func main() { probe := "/health"; _ = probe; http.ListenAndServe(":9090", nil) }`, ""},
+		{"method-prefixed route", `package main
+import "net/http"
+func main() {
+	cmd.Flags().IntVar(&port, "port", 4567, "port")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", h)
+	_ = http.Server{}
+}`, "http://localhost:4567/healthz"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := goWebRepo(t, map[string]string{"main.go": c.main}).HealthEndpoint; got != c.want {
+				t.Fatalf("health = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestDetectGoWritesNoGuessedPort: a Go web repository whose port is not in the code gets an
+// empty port and health endpoint in the config add-repo writes, not 8080.
+func TestDetectGoWritesNoGuessedPort(t *testing.T) {
+	found := goWebRepo(t, map[string]string{
+		"main.go": "package main\nimport \"net/http\"\nfunc main() { s := &http.Server{}; _ = s }\n",
+	})
+	if found.Kind != "web" || found.Port != "" || found.HealthEndpoint != "" {
+		t.Fatalf("kind/port/health = %q/%q/%q, want web and empty", found.Kind, found.Port, found.HealthEndpoint)
+	}
+	text, err := RenderRepoConfig("", "svc", found, "main", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		// The template's section for the dev server (named "dev" in the specification).
+		Service map[string]any `yaml:"service"`
+	}
+	if err := yaml.Unmarshal([]byte(text), &cfg); err != nil {
+		t.Fatalf("invalid YAML: %v\n%s", err, text)
+	}
+	for _, k := range []string{"port", "health_endpoint"} {
+		v, ok := cfg.Service[k]
+		if !ok || v != "" {
+			t.Fatalf("service.%s = %#v (present %v), want \"\"\n%s", k, v, ok, text)
+		}
+	}
+}
+
+// TestDetectGoOnTheForemanRepository: the kit's own repository serves its portal on 4567
+// with the probe /healthz, and detection must say so.
+func TestDetectGoOnTheForemanRepository(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := DetectRepoStack(root)
+	if found.Port != "4567" || found.HealthEndpoint != "http://localhost:4567/healthz" {
+		t.Fatalf("port/health = %q/%q, want 4567 and http://localhost:4567/healthz", found.Port, found.HealthEndpoint)
+	}
+}

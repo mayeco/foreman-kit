@@ -1617,15 +1617,21 @@ func detectGoRepo(dir string, has func(string) bool, found *RepoDetection) {
 	}
 
 	if web != "" {
-		port := "8080"
-		if m := goPortListenRe.FindStringSubmatch(code); len(m) == 2 {
-			port = m[1]
-		} else if m := goPortEnvDefaultRe.FindStringSubmatch(code); len(m) == 2 {
-			port = m[1]
+		// No guess: a port the code does not show is left empty for a person to fill.
+		stripped := stripGoComments(code)
+		port := goFlagPort(dir)
+		if port == "" {
+			if m := goPortEnvDefaultRe.FindStringSubmatch(stripped); len(m) == 2 {
+				port = m[1]
+			} else if m := goPortListenRe.FindStringSubmatch(stripped); len(m) == 2 {
+				port = m[1]
+			}
 		}
 		found.Port = port
-		if hp := detectHealth(code); hp != "" {
-			found.HealthEndpoint = "http://localhost:" + port + hp
+		if port != "" {
+			if hp := detectGoHealth(stripped); hp != "" {
+				found.HealthEndpoint = "http://localhost:" + port + hp
+			}
 		}
 	}
 
@@ -1678,13 +1684,15 @@ func RenderRepoConfig(root, name string, found RepoDetection, branch, envScript 
 		return &s
 	}
 
+	// A Go repository's port is never guessed: nothing detected is written as empty.
+	isGo := strings.HasPrefix(found.Stack, "go-")
 	values := []kv{
 		{"REPO_NAME", optStr(name, name != "")},
 		{"TECH_STACK", optStr(found.Stack, found.Stack != "")},
 		{"BASE_BRANCH", optStr(branch, branch != "")},
 		{"DEV_COMMAND", optStr(found.DevCommand, found.DevCommand != "")},
-		{"DEV_PORT", optStr(found.Port, found.Port != "" || found.Kind == "cli")},
-		{"HEALTH_ENDPOINT", optStr(found.HealthEndpoint, found.HealthEndpoint != "" || found.Kind == "cli")},
+		{"DEV_PORT", optStr(found.Port, found.Port != "" || found.Kind == "cli" || isGo)},
+		{"HEALTH_ENDPOINT", optStr(found.HealthEndpoint, found.HealthEndpoint != "" || found.Kind == "cli" || isGo)},
 		{"LINT_COMMAND", optStr(found.Gates["lint"], found.Gates["lint"] != "")},
 		{"TYPECHECK_COMMAND", optStr(found.Gates["typecheck"], found.Gates["typecheck"] != "")},
 		{"TEST_COMMAND", optStr(found.Gates["test"], found.Gates["test"] != "")},
@@ -2253,4 +2261,199 @@ func equalStringSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// stripGoComments blanks the // and /* */ comments of Go source (keeping every newline, so
+// line structure survives) and copies interpreted strings, raw strings and runes verbatim,
+// so that a "//" inside a literal is not taken for a comment.
+func stripGoComments(code string) string {
+	var b strings.Builder
+	b.Grow(len(code))
+	n := len(code)
+	for i := 0; i < n; {
+		c := code[i]
+		switch {
+		case c == '/' && i+1 < n && code[i+1] == '/':
+			for i < n && code[i] != '\n' {
+				b.WriteByte(' ')
+				i++
+			}
+		case c == '/' && i+1 < n && code[i+1] == '*':
+			b.WriteString("  ")
+			i += 2
+			for i < n && !(code[i] == '*' && i+1 < n && code[i+1] == '/') {
+				if code[i] == '\n' {
+					b.WriteByte('\n')
+				} else {
+					b.WriteByte(' ')
+				}
+				i++
+			}
+			if i < n {
+				b.WriteString("  ")
+				i += 2
+			}
+		case c == '"' || c == '\'':
+			b.WriteByte(c)
+			i++
+			for i < n && code[i] != c && code[i] != '\n' {
+				if code[i] == '\\' && i+1 < n {
+					b.WriteByte(code[i])
+					i++
+				}
+				b.WriteByte(code[i])
+				i++
+			}
+			if i < n && code[i] == c {
+				b.WriteByte(c)
+				i++
+			}
+		case c == '`':
+			j := strings.IndexByte(code[i+1:], '`')
+			if j < 0 {
+				b.WriteString(code[i:])
+				i = n
+			} else {
+				b.WriteString(code[i : i+j+2])
+				i += j + 2
+			}
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return b.String()
+}
+
+var (
+	// A flag named port: flag.Int, flag.IntVar, cobra/pflag Int, IntP, IntVar, IntVarP, or
+	// their String forms with a quoted numeric default. Groups: method, default, usage.
+	goPortFlagRe = regexp.MustCompile(`\b(Int|IntVar|IntP|IntVarP|String|StringVar|StringP|StringVarP)\(\s*(?:&[\w.]+\s*,\s*)?"port"\s*,\s*(?:"[^"\n]*"\s*,\s*)??(\d{1,5}|[A-Za-z_]\w*|"\d{1,5}")\s*,\s*"((?:[^"\\\n]|\\.)*)"`)
+	// The number a usage text documents as the default: "TCP port (default 4567)".
+	goUsageDefaultRe = regexp.MustCompile(`default\s+(\d{2,5})\b`)
+	// A const declaration, single or grouped.
+	goConstBlockRe  = regexp.MustCompile(`(?s)\bconst\s*\((.*?)\)`)
+	goConstSingleRe = regexp.MustCompile(`\bconst\s+([A-Za-z_]\w*)\s*(?:int\s*)?=\s*(\d{1,5})\b`)
+)
+
+// goSourceFiles lists the non-test .go files under dir in lexical walk order, with the same
+// skips as readSources.
+func goSourceFiles(dir string) []string {
+	var files []string
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "vendor", "node_modules", ".git", "dist", "build", ".next", "coverage":
+				if p != dir {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".go") && !strings.HasSuffix(d.Name(), "_test.go") {
+			if info, err := d.Info(); err == nil && info.Size() < 200000 {
+				files = append(files, p)
+			}
+		}
+		return nil
+	})
+	return files
+}
+
+// goConstValue resolves name to the integer of a const declared in the non-test .go files of
+// dir (that directory only, the flag's package), or "".
+func goConstValue(dir, name string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	inBlock := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(name) + `\s*(?:int\s*)?=\s*(\d{1,5})\b`)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		code := stripGoComments(string(b))
+		for _, m := range goConstSingleRe.FindAllStringSubmatch(code, -1) {
+			if m[1] == name {
+				return m[2]
+			}
+		}
+		for _, blk := range goConstBlockRe.FindAllStringSubmatch(code, -1) {
+			if m := inBlock.FindStringSubmatch(blk[1]); m != nil {
+				return m[1]
+			}
+		}
+	}
+	return ""
+}
+
+// goFlagPort returns the port of the first flag named port under dir whose default resolves
+// to a port: a literal, a same-package const, or for a zero default the "default N" of its
+// usage text. It returns "" when no flag yields one.
+func goFlagPort(dir string) string {
+	for _, p := range goSourceFiles(dir) {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, m := range goPortFlagRe.FindAllStringSubmatch(stripGoComments(string(b)), -1) {
+			method, def, usage := m[1], m[2], m[3]
+			isString := strings.HasPrefix(method, "String")
+			switch {
+			case strings.HasPrefix(def, `"`):
+				if !isString {
+					continue
+				}
+				def = strings.Trim(def, `"`)
+			case def[0] >= '0' && def[0] <= '9':
+				if isString {
+					continue
+				}
+			default:
+				if isString {
+					continue
+				}
+				def = goConstValue(filepath.Dir(p), def)
+			}
+			if def == "" {
+				continue
+			}
+			if strings.Trim(def, "0") == "" {
+				if u := goUsageDefaultRe.FindStringSubmatch(usage); u != nil {
+					return u[1]
+				}
+				continue
+			}
+			return def
+		}
+	}
+	return ""
+}
+
+// goHealthRouteRes match, for each of healthPaths, a route registration whose quoted pattern
+// is that path, optionally after an HTTP method ("GET /healthz").
+var goHealthRouteRes = func() []*regexp.Regexp {
+	res := make([]*regexp.Regexp, len(healthPaths))
+	for i, hp := range healthPaths {
+		res[i] = regexp.MustCompile(`\b(?:HandleFunc|Handle|Get|GET|Any|Head|HEAD)\(\s*["` + "`" + `](?:[A-Z]+\s+)?` + regexp.QuoteMeta(hp) + `["` + "`" + `]`)
+	}
+	return res
+}()
+
+// detectGoHealth returns the first of healthPaths registered as a route in comment-free Go
+// code, or "".
+func detectGoHealth(code string) string {
+	for i, re := range goHealthRouteRes {
+		if re.MatchString(code) {
+			return healthPaths[i]
+		}
+	}
+	return ""
 }

@@ -46,6 +46,8 @@ var FaultScenarios = []string{
 	"fault-agent-gives-up-or-disk-full",
 	"fault-git-base-force-pushed",
 	"fault-git-submodule-pointer-missing",
+	"fault-git-child-push-during-pushing-children",
+	"fault-git-child-push-before-pushing-root",
 	"fault-disk-worktrees-unwritable",
 	"fault-disk-full-during-gates",
 	"fault-jev-outage-timeout-garbage-enforce",
@@ -243,6 +245,10 @@ func (fe *faultEnv) run(name string) error {
 		err = fe.gitBaseForcePushed()
 	case "fault-git-submodule-pointer-missing":
 		err = fe.gitSubmodulePointerMissing()
+	case "fault-git-child-push-during-pushing-children":
+		err = fe.gitChildPushDuringPushingChildren()
+	case "fault-git-child-push-before-pushing-root":
+		err = fe.gitChildPushBeforePushingRoot()
 	case "fault-disk-worktrees-unwritable":
 		err = fe.diskWorktreesUnwritable()
 	case "fault-disk-full-during-gates":
@@ -1572,4 +1578,224 @@ func (fe *faultEnv) backlogEdgeCases() error {
 		}
 	}
 	return fe.check(fmt.Sprintf("duplicate backlog entry integrated exactly once (found %d)", count), count == 1)
+}
+
+// ---------------------------------------------------------------------------
+// A person pushes to a child repository while the merger publishes a change
+// ---------------------------------------------------------------------------
+
+// personPush is a person's commit prepared in a side clone of the backend remote, pushed to main by
+// a one-shot hook on that remote while the merger publishes a change.
+type personPush struct {
+	hook   string // the installed hook
+	side   string // the side clone holding the person's commit
+	marker string // created by the hook's first invocation
+	log    string // what the hook's nested push printed
+}
+
+// installPersonPushHook prepares a person's commit (path, based on the backend remote's current main)
+// in a side clone and installs a one-shot POSIX sh hook (pre-receive or post-receive) on the backend
+// remote. The first invocation that updates refs/heads/main creates the marker and pushes the
+// person's commit with the hook's git environment scrubbed; a post-receive hook first rebases it onto
+// the main the merger just pushed. The hook always exits 0: a refusal by the hook itself is a policy
+// rejection, a different scenario.
+func (fe *faultEnv) installPersonPushHook(kind, path, content string) (*personPush, error) {
+	pp := &personPush{
+		hook:   filepath.Join(fe.backendBare(), "hooks", kind),
+		side:   filepath.Join(fe.st.RootDir, "tmp-person-backend-"+kind),
+		marker: filepath.Join(fe.st.RootDir, "person-push-"+kind+".fired"),
+		log:    filepath.Join(fe.st.RootDir, "person-push-"+kind+".log"),
+	}
+	_ = os.RemoveAll(pp.side)
+	_ = os.Remove(pp.marker)
+	_ = os.Remove(pp.log)
+	if _, err := fe.git(fe.st.RootDir, "clone", "-q", "-b", "main", fe.backendBare(), pp.side); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(pp.side, path), []byte(content), 0o644); err != nil {
+		return nil, err
+	}
+	for _, args := range [][]string{
+		{"config", "user.name", "person"},
+		{"config", "user.email", "person@example.com"},
+		{"add", path},
+		{"commit", "-q", "-m", "fix: person's hotfix " + path},
+	} {
+		if _, err := fe.git(pp.side, args...); err != nil {
+			return nil, fmt.Errorf("person %v: %w", args, err)
+		}
+	}
+	rebase := ""
+	if kind == "post-receive" {
+		rebase = "git fetch -q origin main && git rebase -q origin/main && "
+	}
+	script := fmt.Sprintf(`#!/bin/sh
+fire=0
+while read old new ref; do
+  [ "$ref" = "refs/heads/main" ] && fire=1
+done
+[ "$fire" = 1 ] || exit 0
+[ -e %[1]s ] && exit 0
+: > %[1]s
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PUSH_OPTION_COUNT GIT_PUSH_OPTION_0 GIT_PUSH_OPTION_1
+( cd %[2]s && %[4]sgit push -q origin HEAD:refs/heads/main ) >> %[3]s 2>&1
+echo "nested push exit $?" >> %[3]s
+exit 0
+`, shQuote(pp.marker), shQuote(pp.side), shQuote(pp.log), rebase)
+	if err := os.WriteFile(pp.hook, []byte(script), 0o755); err != nil {
+		return nil, err
+	}
+	return pp, nil
+}
+
+// remove takes the hook and the side clone away.
+func (pp *personPush) remove() {
+	_ = os.Remove(pp.hook)
+	_ = os.RemoveAll(pp.side)
+}
+
+func (pp *personPush) fired() bool {
+	_, err := os.Stat(pp.marker)
+	return err == nil
+}
+
+func (pp *personPush) output() string {
+	b, _ := os.ReadFile(pp.log)
+	return strings.TrimSpace(string(b))
+}
+
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// backendHasCommit reports whether sha is main or an ancestor of main on the backend remote.
+func (fe *faultEnv) backendHasCommit(sha string) bool {
+	if sha == "" {
+		return false
+	}
+	_, err := fe.git(fe.backendBare(), "merge-base", "--is-ancestor", sha, "main")
+	return err == nil
+}
+
+// umbrellaGitlink is the repos/backend gitlink of the umbrella remote's master.
+func (fe *faultEnv) umbrellaGitlink() string {
+	ls, err := fe.git(fe.umbrellaBare(), "ls-tree", "master", "repos/backend")
+	if err != nil {
+		return ""
+	}
+	if fields := strings.Fields(ls); len(fields) >= 3 {
+		return fields[2]
+	}
+	return ""
+}
+
+// gitlinkOnChildBase reports whether the umbrella's gitlink exists on the backend remote and is an
+// ancestor of (or is) its main.
+func (fe *faultEnv) gitlinkOnChildBase() bool {
+	return fe.umbrellaGitlinkReachable() && fe.backendHasCommit(fe.umbrellaGitlink())
+}
+
+// retryableBlocks are the block reasons blocked_changes.retry_after retries for a refused push.
+var retryableBlocks = map[string]bool{"push_failed": true, "transient_error": true}
+
+// A person's commit lands on the child's main during PUSHING_CHILDREN: the pre-receive hook pushes it
+// while the merger's own push of that child waits for its ref update, which then loses the race.
+func (fe *faultEnv) gitChildPushDuringPushingChildren() error {
+	const change = "child-race-pushing-children"
+	fe.agents([]string{"sim-agent-clean"}, []string{"sim-agent-clean"})
+	fe.backlog(change)
+	if err := fe.dispatch(1, time.Time{}); err != nil {
+		fe.note("dispatch: %v", err)
+	}
+	if err := fe.check(change+" queued for merge", fe.inReadyQueue(change)); err != nil {
+		return err
+	}
+	gitlinkBefore := fe.umbrellaGitlink()
+	pp, err := fe.installPersonPushHook("pre-receive", "PERSON_HOTFIX_DURING.md", "person's hotfix during PUSHING_CHILDREN\n")
+	if err != nil {
+		return err
+	}
+	defer pp.remove()
+	personSHA, _ := fe.git(pp.side, "rev-parse", "HEAD")
+
+	// Watch the umbrella gitlink at each gate run of the merge: it must never name a child commit the
+	// child's main lacks.
+	unreachable := false
+	observe := func() {
+		if fe.umbrellaGitlink() != gitlinkBefore && !fe.gitlinkOnChildBase() {
+			unreachable = true
+		}
+	}
+	mergeErr := fe.merge(func(ctx context.Context, req orchestrator.GateRunRequest) (orchestrator.GateRunResult, error) {
+		observe()
+		return orchestrator.DefaultGateRunner(fe.db)(ctx, req)
+	})
+	observe()
+	fe.syncMain()
+	fe.note("merge under the race returned: %v (blocked=%q); hook: %s", mergeErr, fe.blockedReason(change), pp.output())
+
+	if err := fe.check("the person's push ran inside the merger's child push (pre-receive hook fired)", pp.fired() && strings.Contains(pp.output(), "nested push exit 0")); err != nil {
+		return err
+	}
+	if err := fe.check("the merger's first child push was refused (merge.push_rejected)", len(fe.events("merge.push_rejected", change)) >= 1); err != nil {
+		return err
+	}
+	if err := fe.check("the umbrella never recorded a gitlink the child's main lacks", !unreachable && fe.umbrellaGitlinkReachable()); err != nil {
+		return err
+	}
+	if !fe.integrated(change) {
+		reason := fe.blockedReason(change)
+		if err := fe.check(fmt.Sprintf("the change is blocked with a retryable reason (%q)", reason), retryableBlocks[reason]); err != nil {
+			return err
+		}
+	}
+	if err := fe.check("change state: integrated (at once or after recovery)", fe.recover(change, 3)); err != nil {
+		return err
+	}
+	if err := fe.check("person's commit on the child's base", fe.backendHasCommit(personSHA)); err != nil {
+		return err
+	}
+	if err := fe.check("change's commit on the child's base (feature file on main)", fe.featureOnOrigin(change)); err != nil {
+		return err
+	}
+	return fe.check("umbrella gitlink reachable and on the child's base", fe.gitlinkOnChildBase())
+}
+
+// A person's commit lands on the child's main after the merger pushed that child and before it pushes
+// the umbrella: the post-receive hook pushes it on top of the merger's child commit.
+func (fe *faultEnv) gitChildPushBeforePushingRoot() error {
+	const change = "child-race-before-root"
+	fe.agents([]string{"sim-agent-clean"}, []string{"sim-agent-clean"})
+	fe.backlog(change)
+	if err := fe.dispatch(1, time.Time{}); err != nil {
+		fe.note("dispatch: %v", err)
+	}
+	if err := fe.check(change+" queued for merge", fe.inReadyQueue(change)); err != nil {
+		return err
+	}
+	pp, err := fe.installPersonPushHook("post-receive", "PERSON_HOTFIX_BEFORE_ROOT.md", "person's hotfix before PUSHING_ROOT\n")
+	if err != nil {
+		return err
+	}
+	defer pp.remove()
+
+	mergeErr := fe.merge(nil)
+	fe.syncMain()
+	fe.note("merge under the race returned: %v (blocked=%q); hook: %s", mergeErr, fe.blockedReason(change), pp.output())
+
+	if err := fe.check("the person's push ran right after the merger's child push (post-receive hook fired)", pp.fired() && strings.Contains(pp.output(), "nested push exit 0")); err != nil {
+		return err
+	}
+	if err := fe.check("change state: integrated", fe.integrated(change)); err != nil {
+		return err
+	}
+	tip, _ := fe.git(fe.backendBare(), "rev-parse", "main")
+	subject, _ := fe.git(fe.backendBare(), "log", "-1", "--format=%an %s", "main")
+	if err := fe.check("person's commit on the child's base (it is main's tip)", strings.HasPrefix(subject, "person ") && fe.backendHasCommit(tip)); err != nil {
+		return err
+	}
+	gitlink := fe.umbrellaGitlink()
+	if err := fe.check("change's commit on the child's base (the gitlink is an ancestor of the person's tip)",
+		gitlink != "" && gitlink != tip && fe.backendHasCommit(gitlink) && fe.featureOnOrigin(change)); err != nil {
+		return err
+	}
+	return fe.check("umbrella gitlink reachable and on the child's base", fe.gitlinkOnChildBase())
 }

@@ -108,7 +108,7 @@ A release is a tag `v<semver>` pushed to GitHub (`v4.1.0`; `v4.1.0-rc.1` is a pr
 `.github/workflows/release.yml`:
 
 1. **verify**: `go vet`, the build, every test, the evaluator's contract, the 14 simulations and the
-   24 fault scenarios, with `openspec` and `agent-memory` installed from npm (the tests run them).
+   26 fault scenarios, with `openspec` and `agent-memory` installed from npm (the tests run them).
 2. **GitHub release**: [GoReleaser](https://goreleaser.com) (`.goreleaser.yaml`) builds the static
    binary for macOS and Linux on amd64 and arm64 with the tag's version in it, and uploads each one
    as `foreman-kit-<os>-<arch>` (what `install.sh` downloads) with `checksums.txt`.
@@ -328,7 +328,7 @@ CGO_ENABLED=0 go test ./...
 # Run the full 14-scenario end-to-end simulation laboratory
 ./bin/foreman-kit sim run /tmp/sim_stack all
 
-# Run the 24 fault-injection scenarios (or one by name; `everything` runs both groups)
+# Run the 26 fault-injection scenarios (or one by name; `everything` runs both groups)
 ./bin/foreman-kit sim run /tmp/sim_stack faults
 ./bin/foreman-kit sim run /tmp/sim_stack fault-git-base-force-pushed
 ```

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mayeco/foreman-kit/internal/cycle"
+	"github.com/mayeco/foreman-kit/internal/gitx"
 	"github.com/mayeco/foreman-kit/internal/orchestrator"
 	"github.com/mayeco/foreman-kit/internal/store"
 )
@@ -384,22 +385,49 @@ func TestABacklogThatIsMissingIsSaidAndIsNotWrittenOver(t *testing.T) {
 
 // TestNoSyncFromThePortalDuringAVisualQASession: neither a cycle nor the dispatcher moves the main
 // checkout while a visual QA session works in it, and the sync itself does not look. The action of
-// the portal does: it answers 409 and names the session, alone or with what it publishes, and syncs
-// again once the session has ended.
+// the portal does: it answers 409 and names the session, alone or with what it publishes, moves no
+// checkout, pushes nothing and writes no row, and syncs again once the session has ended.
 func TestNoSyncFromThePortalDuringAVisualQASession(t *testing.T) {
-	srv, st, _ := setupTestPortal(t)
+	srv, st, root := setupTestPortal(t)
 	ctx := context.Background()
+	child := addChildRepository(t, root, "child")
+
 	const stamp = "20261111T090000Z"
 	if _, err := st.AcquireLock(ctx, "visual_qa", store.LockOptions{OwnerType: "visual_qa", PID: os.Getpid(), Stamp: stamp, TTL: time.Hour}); err != nil {
 		t.Fatal(err)
 	}
+	umbrellaHead, childHead := headOf(t, root), headOf(t, child)
+	rows := rowCounts(t, st)
+
 	for _, publish := range []bool{false, true} {
 		code, body, problem := post(t, srv, "/api/repos/sync", map[string]any{"publish": publish})
-		if _, message := errorOf(body); code != http.StatusConflict || problem != "conflict" || !strings.Contains(message, stamp) {
+		_, message := errorOf(body)
+		if code != http.StatusConflict || problem != "conflict" || !strings.Contains(message, stamp) {
 			t.Errorf("a sync during a visual QA session (publish %v) = %d %v, want 409 with the session named", publish, code, body)
+		}
+		if !strings.Contains(message, "end the session") {
+			t.Errorf("a sync refused during a visual QA session (publish %v) says %q, want it to say to end the session", publish, message)
+		}
+	}
+	if got := headOf(t, root); got != umbrellaHead {
+		t.Errorf("a refused sync moved the main checkout from %s to %s", umbrellaHead, got)
+	}
+	if got := headOf(t, child); got != childHead {
+		t.Errorf("a refused sync moved the child repository from %s to %s", childHead, got)
+	}
+	after := rowCounts(t, st)
+	for table, n := range rows {
+		if after[table] != n {
+			t.Errorf("a refused sync changed the rows of %s from %d to %d", table, n, after[table])
+		}
+	}
+	for table, n := range after {
+		if _, ok := rows[table]; !ok {
+			t.Errorf("a refused sync created the table %s with %d rows", table, n)
 		}
 	}
 
+	// The lock release visual-qa end performs once its session is over.
 	if err := st.ReleaseLock(ctx, "visual_qa", os.Getpid()); err != nil {
 		t.Fatal(err)
 	}
@@ -407,4 +435,75 @@ func TestNoSyncFromThePortalDuringAVisualQASession(t *testing.T) {
 	if said := asStr(body["output"]); code != http.StatusOK || !strings.Contains(said, "Umbrella") {
 		t.Errorf("a sync once the session has ended = %d %v, want what the sync said", code, body)
 	}
+}
+
+// addChildRepository makes a git repository with one commit and adds it to the umbrella at root as
+// the child repository repos/<name>, committed. It returns the child's checkout.
+func addChildRepository(t *testing.T, root, name string) string {
+	t.Helper()
+	ctx := context.Background()
+	source := filepath.Join(t.TempDir(), name)
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("# "+name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		dir  string
+		args []string
+	}{
+		{source, []string{"init", "-b", "master"}},
+		{source, []string{"config", "user.name", "Portal Test"}},
+		{source, []string{"config", "user.email", "portal@example.com"}},
+		{source, []string{"add", "-A"}},
+		{source, []string{"commit", "-m", "initial commit"}},
+		{root, []string{"-c", "protocol.file.allow=always", "submodule", "add", "-b", "master", source, "repos/" + name}},
+		{root, []string{"commit", "-m", "add the child repository " + name}},
+	} {
+		if out, err := gitx.RunGit(ctx, step.dir, step.args...); err != nil {
+			t.Fatalf("git %v in %s failed: %v\n%s", step.args, step.dir, err, out)
+		}
+	}
+	return filepath.Join(root, "repos", name)
+}
+
+// headOf returns the commit HEAD of the git checkout at dir points to.
+func headOf(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := gitx.RunGit(context.Background(), dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD in %s failed: %v", dir, err)
+	}
+	return strings.TrimSpace(out)
+}
+
+// rowCounts returns the number of rows of every table of the state database.
+func rowCounts(t *testing.T, st *store.Store) map[string]int {
+	t.Helper()
+	db := st.DB()
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	counts := make(map[string]int, len(tables))
+	for _, table := range tables {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`).Scan(&n); err != nil {
+			t.Fatalf("counting the rows of %s: %v", table, err)
+		}
+		counts[table] = n
+	}
+	return counts
 }

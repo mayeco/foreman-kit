@@ -216,6 +216,8 @@ func main() {
 }
 
 func TestProposalsReviewPromptAndJev(t *testing.T) {
+	// The values a pipeline run passes in the environment must not reach this test.
+	t.Setenv(settings.RunOverridesEnv, "")
 	ctx := context.Background()
 	appDir := t.TempDir()
 	if err := Init(ctx, appDir, KitOptions{Agents: "claude"}, nil); err != nil {
@@ -643,6 +645,8 @@ func TestVisualQAAndProgressAndRunner(t *testing.T) {
 }
 
 func TestDaemonForegroundWithWebAndStatusStop(t *testing.T) {
+	// The values a pipeline run passes in the environment must not reach this test.
+	t.Setenv(settings.RunOverridesEnv, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

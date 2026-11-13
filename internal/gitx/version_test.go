@@ -223,8 +223,36 @@ func scanGoSourceForForbiddenGit(fset *token.FileSet, rel string, file *ast.File
 	}
 
 	var violations []string
+	// initWithBranch reports an argument list that runs "git init" with -b or --initial-branch,
+	// both added in git 2.28; "-b" alone stays legitimate for "git checkout -b".
+	initWithBranch := func(args []ast.Expr) (ast.Expr, bool) {
+		hasInit := false
+		var branchFlag ast.Expr
+		for _, arg := range args {
+			lit, ok := arg.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				continue
+			}
+			val, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				continue
+			}
+			if val == "init" {
+				hasInit = true
+			}
+			if val == "-b" || val == "--initial-branch" || strings.HasPrefix(val, "--initial-branch=") {
+				branchFlag = lit
+			}
+		}
+		return branchFlag, hasInit && branchFlag != nil
+	}
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch node := n.(type) {
+		case *ast.CompositeLit:
+			if flag, bad := initWithBranch(node.Elts); bad {
+				pos := fset.Position(flag.Pos())
+				violations = append(violations, pos.String()+": argument list runs git init with an initial branch flag (git 2.28+); use gitx.SetInitialBranch")
+			}
 		case *ast.BasicLit:
 			if node.Kind != token.STRING {
 				return true
@@ -241,6 +269,10 @@ func scanGoSourceForForbiddenGit(fset *token.FileSet, rel string, file *ast.File
 			fnName := callFuncName(node.Fun)
 			if !gitRunners[fnName] {
 				return true
+			}
+			if flag, bad := initWithBranch(node.Args); bad {
+				pos := fset.Position(flag.Pos())
+				violations = append(violations, pos.String()+": "+fnName+" runs git init with an initial branch flag (git 2.28+); use gitx.SetInitialBranch")
 			}
 			for _, arg := range node.Args {
 				lit, ok := arg.(*ast.BasicLit)
@@ -272,6 +304,11 @@ func TestPortableGitCommandsGuard(t *testing.T) {
 		`package p; func f() { gitx.RunGit(ctx, d, "switch", "main") }`,
 		`package p; func f() { gitx.RunGit(ctx, d, "restore", "a.txt") }`,
 		`package p; func f() { gitx.RunGit(ctx, d, "branch", "--show-current") }`,
+		`package p; func f() { gitx.RunGit(ctx, d, "init", "-b", "main") }`,
+		`package p; func f() { gitx.RunGit(ctx, d, "init", "--bare", "--initial-branch=main", p) }`,
+		`package p; func f() { gitx.RunGit(ctx, d, "init", "--initial-branch", "main") }`,
+		`package p; var a = []string{"init", "-b", "main"}`,
+		`package p; var a = [][]string{{"init", "-b", "main"}, {"config", "k", "v"}}`,
 	} {
 		fset := token.NewFileSet()
 		parsed, err := parser.ParseFile(fset, "internal/orchestrator/sample.go", bad, 0)
@@ -280,6 +317,20 @@ func TestPortableGitCommandsGuard(t *testing.T) {
 		}
 		if got := scanGoSourceForForbiddenGit(fset, "internal/orchestrator/sample.go", parsed); len(got) == 0 {
 			t.Fatalf("expected guard to reject %s", bad)
+		}
+	}
+	for _, ok := range []string{
+		`package p; func f() { gitx.RunGit(ctx, d, "checkout", "-b", "x") }`,
+		`package p; func f() { gitx.RunGit(ctx, d, "init", "--bare", p) }`,
+		`package p; var a = [][]string{{"init"}, {"checkout", "-b", "x"}}`,
+	} {
+		fset := token.NewFileSet()
+		parsed, err := parser.ParseFile(fset, "internal/orchestrator/sample.go", ok, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := scanGoSourceForForbiddenGit(fset, "internal/orchestrator/sample.go", parsed); len(got) != 0 {
+			t.Fatalf("expected guard to allow %s, got %v", ok, got)
 		}
 	}
 	allowed := `package config; const denied = "Bash(git commit *) Bash(git checkout *) Bash(git switch *)"`
@@ -347,4 +398,28 @@ func callFuncName(expr ast.Expr) string {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func TestSetInitialBranchPointsHeadOfANewRepository(t *testing.T) {
+	ctx := context.Background()
+	for _, bare := range []bool{false, true} {
+		dir := filepath.Join(t.TempDir(), "repo")
+		args := []string{"init"}
+		if bare {
+			args = append(args, "--bare")
+		}
+		if _, err := RunGit(ctx, t.TempDir(), append(args, dir)...); err != nil {
+			t.Fatalf("git init (bare=%v): %v", bare, err)
+		}
+		if err := SetInitialBranch(ctx, dir, "trunk"); err != nil {
+			t.Fatalf("SetInitialBranch (bare=%v): %v", bare, err)
+		}
+		out, err := RunGit(ctx, dir, "symbolic-ref", "HEAD")
+		if err != nil {
+			t.Fatalf("symbolic-ref HEAD (bare=%v): %v", bare, err)
+		}
+		if got := strings.TrimSpace(out); got != "refs/heads/trunk" {
+			t.Fatalf("bare=%v: HEAD = %q, want refs/heads/trunk", bare, got)
+		}
+	}
 }

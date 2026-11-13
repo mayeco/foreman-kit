@@ -36,6 +36,18 @@ func CurrentBranch(ctx context.Context, dir string) (string, bool) {
 	return branch, true
 }
 
+// SetInitialBranch points HEAD of the repository in dir (bare or not) at refs/heads/<branch>,
+// leaving that branch unborn until the first commit or push. Run it right after a plain
+// "git init" or "git init --bare": it gives the same result as "git init -b <branch>", which
+// needs git 2.28, while symbolic-ref works on every supported git (MinVersion).
+func SetInitialBranch(ctx context.Context, dir, branch string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := RunGit(ctx, dir, "symbolic-ref", "HEAD", "refs/heads/"+branch)
+	return err
+}
+
 // ParseVersion extracts the "X.Y.Z" version triple from `git --version` output or a raw version
 // string, ignoring vendor suffixes such as "2.39.5 (Apple Git-154)" or "2.20.1.windows.1".
 func ParseVersion(raw string) (string, bool) {

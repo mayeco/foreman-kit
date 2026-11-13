@@ -93,10 +93,16 @@ func InitStack(ctx context.Context, stackDir string, out io.Writer) (*Stack, err
 	if err := os.MkdirAll(st.RemotesDir, 0o755); err != nil {
 		return nil, err
 	}
-	if _, err := gitx.RunGit(ctx, st.RemotesDir, "init", "--bare", "-b", "main", backendBare); err != nil {
+	if _, err := gitx.RunGit(ctx, st.RemotesDir, "init", "--bare", backendBare); err != nil {
 		return nil, err
 	}
-	if _, err := gitx.RunGit(ctx, st.RemotesDir, "init", "--bare", "-b", "master", umbrellaBare); err != nil {
+	if err := gitx.SetInitialBranch(ctx, backendBare, "main"); err != nil {
+		return nil, err
+	}
+	if _, err := gitx.RunGit(ctx, st.RemotesDir, "init", "--bare", umbrellaBare); err != nil {
+		return nil, err
+	}
+	if err := gitx.SetInitialBranch(ctx, umbrellaBare, "master"); err != nil {
 		return nil, err
 	}
 
@@ -108,8 +114,13 @@ func InitStack(ctx context.Context, stackDir string, out io.Writer) (*Stack, err
 	}
 	defer os.RemoveAll(backendSeed)
 
+	if _, err := gitx.RunGit(ctx, backendSeed, "init"); err != nil {
+		return nil, err
+	}
+	if err := gitx.SetInitialBranch(ctx, backendSeed, "main"); err != nil {
+		return nil, err
+	}
 	for _, args := range [][]string{
-		{"init", "-b", "main"},
 		{"config", "user.name", "sim-bot"},
 		{"config", "user.email", "sim-bot@example.com"},
 		{"remote", "add", "origin", backendBare},
@@ -139,8 +150,13 @@ gates:
 	if err := os.MkdirAll(st.WorkspaceDir, 0o755); err != nil {
 		return nil, err
 	}
+	if _, err := gitx.RunGit(ctx, st.WorkspaceDir, "init"); err != nil {
+		return nil, err
+	}
+	if err := gitx.SetInitialBranch(ctx, st.WorkspaceDir, "master"); err != nil {
+		return nil, err
+	}
 	for _, args := range [][]string{
-		{"init", "-b", "master"},
 		{"config", "user.name", "sim-bot"},
 		{"config", "user.email", "sim-bot@example.com"},
 		{"config", "protocol.file.allow", "always"},

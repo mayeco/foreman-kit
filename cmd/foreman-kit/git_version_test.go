@@ -47,9 +47,9 @@ func setupGitVersionCLITestApp(t *testing.T) (string, *store.Store, string) {
 	settingstest.Give(t, settings.BaseBranch, "master")
 	settingstest.Give(t, settings.EvaluatorEnabled, "false")
 
-	if err := config.Write(root, []string{"claude", "hermes"}, map[string][]string{
-		"plan":  {"claude", "hermes"},
-		"build": {"claude", "hermes"},
+	if err := config.Write(root, []string{"claude"}, map[string][]string{
+		"plan":  {"claude"},
+		"build": {"claude"},
 		"cycle": {"claude"},
 	}, "in_order"); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func setupGitVersionCLITestApp(t *testing.T) (string, *store.Store, string) {
 	}
 	lockData := map[string]any{
 		"version": assets.Version,
-		"agents":  []string{"claude", "hermes"},
+		"agents":  []string{"claude"},
 		"files": map[string]any{
 			firstSkillRel: map[string]any{
 				"class":  "kit",
@@ -110,7 +110,7 @@ func setupGitVersionCLITestApp(t *testing.T) (string, *store.Store, string) {
 	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"openspec", "claude", "hermes"} {
+	for _, name := range []string{"openspec", "claude"} {
 		script := "#!/bin/sh\nprintf '%s 1.0.0 pong\\n' '" + name + "'\nexit 0\n"
 		if err := os.WriteFile(filepath.Join(toolsDir, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)

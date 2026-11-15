@@ -1438,7 +1438,8 @@ func blobAt(ctx context.Context, dir, rev, rel string) (*string, error) {
 // RebaseProposals rebases the session's record commit onto origin/<baseBranch>, reconciling
 // .agent-memory/, .foreman-kit/agent_backlog.json, .foreman-kit/agent_history.json, .foreman-kit/agent_proposals.json,
 // and .foreman-kit/prompts/* from what the record commit and the commit before it hold. A file of either
-// that cannot be read stops it before anything is touched: the record commit stays.
+// that cannot be read stops it before anything is touched: the record commit stays. So does a commit
+// that changes a path outside that scope (the reset would drop it): the error names the paths.
 //
 // It rewrites the checkout in several steps: the reset onto the remote, the reconciled files, the
 // commit. Once it begins it ends, even when ctx ends meanwhile (gitx.ToCompletion): told to stop after
@@ -1485,12 +1486,20 @@ func RebaseProposals(ctx context.Context, root, baseBranch string, out io.Writer
 	if err != nil {
 		return err
 	}
+	// Only the recorded files are made again on top of the remote, so a commit that changes anything
+	// else would lose that work to the reset below: refuse before anything is touched.
+	var outside []string
+	for _, rel := range changed {
+		if !isRecordedPath(rel) {
+			outside = append(outside, rel)
+		}
+	}
+	if len(outside) > 0 {
+		return fmt.Errorf("HEAD changes paths outside the recorded scope: %s; left as it is, rebase it by hand", strings.Join(outside, ", "))
+	}
 	baseBlobs := make(map[string]*string)
 	localBlobs := make(map[string]*string)
 	for _, rel := range changed {
-		if !isRecordedPath(rel) {
-			continue
-		}
 		if baseBlobs[rel], err = blobAt(ctx, root, headSHA+"~1", rel); err != nil {
 			return err
 		}

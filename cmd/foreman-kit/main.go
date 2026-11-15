@@ -1201,6 +1201,12 @@ func buildEvaluateSubcommands(ctx context.Context, stdout, stderr io.Writer, wra
 				fmt.Fprintf(stderr, "evaluate eval: %v\n", err)
 				return wrapCode(2)
 			}
+			// An evaluator or a gate the person turned off is not asked, and not paid for: a dry run
+			// asks nothing, so it still validates the questions.
+			if reason := judge.OffReason(fileFlag); reason != "" && !dryRunFlag {
+				fmt.Fprintf(stderr, "evaluate eval: %s\n", reason)
+				return wrapCode(evaluator.ExitOff)
+			}
 			var state any
 			if stateFileFlag != "" {
 				raw, err := os.ReadFile(stateFileFlag)
@@ -1282,6 +1288,10 @@ func buildEvaluateSubcommands(ctx context.Context, stdout, stderr io.Writer, wra
 			if err != nil {
 				fmt.Fprintf(stderr, "evaluate noul: %v\n", err)
 				return wrapCode(2)
+			}
+			if reason := judge.OffReason(""); reason != "" {
+				fmt.Fprintf(stderr, "evaluate noul: %s\n", reason)
+				return wrapCode(evaluator.ExitOff)
 			}
 			tmpTpl := fmt.Sprintf("questions:\n  answer:\n    type: noul\n    instructions: %q\n", args[0])
 			tmpFile, err := os.CreateTemp("", "evaluate-noul-*.yaml")

@@ -14,6 +14,7 @@ import (
 
 	gojev "github.com/shanehull/go-jev"
 
+	"github.com/mayeco/foreman-kit/internal/settings"
 	"github.com/mayeco/foreman-kit/internal/store"
 )
 
@@ -40,6 +41,29 @@ func NewJudge(root string, st *store.Store) (*Judge, error) {
 }
 
 func (j *Judge) Policy() *Policy { return j.policy }
+
+// ExitOff is the exit code of `foreman-kit evaluate` when the evaluator, or the gate it was asked
+// for, is off: nothing was asked. It is none of 2 (configuration), 3 (no key), 6 (the API failed)
+// or 10 (an assertion failed).
+const ExitOff = 4
+
+// OffReason says why the evaluator must not be asked for file, or "" when it may be. The evaluator
+// is off when the policy says enabled: false or the run was given evaluator.enabled=false. A file
+// that names a gate of the policy (by its name, or as the gate's `file`) is also off when that
+// gate's effective mode is off. A file that names no gate is asked while the evaluator is on, and
+// "" asks for the evaluator's own switch alone. EvaluateTemplate does not check it: the canary of
+// the preflight and the contract are not gates, and Ask has checked the mode before it calls.
+func (j *Judge) OffReason(file string) string {
+	if j == nil || j.policy.Disabled() {
+		return fmt.Sprintf("the evaluator is off (%s: false, or given to this run with --set): nothing was asked",
+			settings.EvaluatorEnabled.Where())
+	}
+	name := j.policy.gateNamed(file)
+	if name != "" && j.policy.GateMode(name) == settings.GateOff {
+		return fmt.Sprintf("the gate %s is off (%s: off): nothing was asked", name, settings.GateMode(name).Where())
+	}
+	return ""
+}
 
 // APIKeyFromEnv returns the evaluator's API key exported in the environment: TYPESAFE_API_KEY, the
 // provider's own variable.

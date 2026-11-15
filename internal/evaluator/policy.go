@@ -339,6 +339,30 @@ func (p *Policy) GateMode(gate string) string {
 	return g.Mode
 }
 
+// gateNamed returns the gate of the policy that file names: the gate called like it (NormalizeGateName),
+// else the gate whose `file` is it. It returns "" for a file that names no gate.
+func (p *Policy) gateNamed(file string) string {
+	if p == nil || strings.TrimSpace(file) == "" {
+		return ""
+	}
+	if name := NormalizeGateName(file); name != "" {
+		if _, ok := p.Gates[name]; ok {
+			return name
+		}
+	}
+	names := make([]string, 0, len(p.Gates))
+	for name := range p.Gates {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if p.Gates[name].File == file {
+			return name
+		}
+	}
+	return ""
+}
+
 // ActiveGates returns, sorted, the gates whose effective mode is advisory or enforce.
 func (p *Policy) ActiveGates() []string {
 	if p == nil {

@@ -449,6 +449,11 @@ func parseRepoGatesConfig(raw []byte, regressionSweep bool, changedFiles []strin
 	if older := config.RepoOfAnOlderKit(cfg); older != "" {
 		return nil, fmt.Errorf("%s %s", config.RepoConfigFile, older)
 	}
+	// A command that is not text (a list, a section) is not skipped: the gate would not run and the
+	// run would pass. The check and the dispatcher's gate runner refuse the same values.
+	if problems := config.RepoCommandProblems(cfg); len(problems) > 0 {
+		return nil, fmt.Errorf("%s is not valid: %s", config.RepoConfigFile, strings.Join(problems, "; "))
+	}
 
 	gatesOrder, gatesMap := extractOrderedStringMap(&doc, "gates")
 	regOrder, regMap := extractOrderedStringMap(&doc, "regression", "commands")

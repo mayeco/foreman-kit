@@ -40,6 +40,9 @@ func parseChildGateConfig(raw []byte) (childGateConfig, error) {
 	if older := config.RepoOfAnOlderKit(data); older != "" {
 		return childGateConfig{}, errors.New(older)
 	}
+	if problems := config.RepoCommandProblems(data); len(problems) > 0 {
+		return childGateConfig{}, errors.New(strings.Join(problems, "; "))
+	}
 	var file struct {
 		EnvScript  string            `yaml:"env_script"`
 		Setup      string            `yaml:"setup"`

@@ -358,7 +358,7 @@ func repoView(root, rel string) map[string]any {
 	if gMap, ok := cfg["gates"].(map[string]any); ok {
 		for k, v := range gMap {
 			cs := strings.TrimSpace(fmt.Sprint(v))
-			if v == nil || cs == "" || hasPlaceholder(cs) {
+			if v == nil || nonScalarKind(v) != "" || cs == "" || hasPlaceholder(cs) {
 				gatesOut[k] = "skipped"
 			} else {
 				gatesOut[k] = cs
@@ -369,7 +369,7 @@ func repoView(root, rel string) map[string]any {
 	if rMap, ok := digMap(cfg, "regression", "commands").(map[string]any); ok {
 		for k, v := range rMap {
 			cs := strings.TrimSpace(fmt.Sprint(v))
-			if v != nil && cs != "" && !hasPlaceholder(cs) {
+			if v != nil && nonScalarKind(v) == "" && cs != "" && !hasPlaceholder(cs) {
 				regOut[k] = cs
 			}
 		}
@@ -1559,6 +1559,9 @@ func RepoProblems(root, rel string) FileProblems {
 	usableGates := make(map[string]string)
 	if gMap, ok := cfg["gates"].(map[string]any); ok {
 		for k, v := range gMap {
+			if nonScalarKind(v) != "" {
+				continue // reported as an error by RepoCommandProblems below
+			}
 			cs := strings.TrimSpace(fmt.Sprint(v))
 			if v != nil && cs != "" && !hasPlaceholder(cs) {
 				usableGates[k] = cs
@@ -1597,21 +1600,16 @@ func RepoProblems(root, rel string) FileProblems {
 			rep.Errors = append(rep.Errors, `required_services: must map a name to the command that checks it, e.g. postgres: "pg_isready -p 5432"`)
 		}
 	}
-	if setup := cfg["setup"]; setup != nil {
-		if _, isStr := setup.(string); !isStr {
-			rep.Errors = append(rep.Errors, "setup: must be a command (text)")
-		}
-	}
+	// setup, the gates and the regression commands are text: foreman-kit gates and the gates of the
+	// dispatcher and the merger refuse the same values (RepoCommandProblems is their one reading).
+	rep.Errors = append(rep.Errors, RepoCommandProblems(cfg)...)
 	regression, _ := cfg["regression"].(map[string]any)
 	if cfg["regression"] != nil && regression == nil {
 		rep.Errors = append(rep.Errors, "regression: must be a section with commands and when")
 	}
 	hasRegCmd := false
 	if commands := regression["commands"]; commands != nil {
-		rMap, ok := commands.(map[string]any)
-		if !ok {
-			rep.Errors = append(rep.Errors, `regression.commands: must map a name to its command, e.g. test: "bundle exec rspec"`)
-		}
+		rMap, _ := commands.(map[string]any) // a non-section is an error of RepoCommandProblems
 		for _, v := range rMap {
 			vs, isStr := v.(string)
 			if isStr && strings.TrimSpace(vs) != "" && !hasPlaceholder(vs) {

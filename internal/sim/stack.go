@@ -608,8 +608,10 @@ func runSingleScenario(ctx context.Context, stackDir, name string, out io.Writer
 			return res, err
 		}
 		repairsContent := findArchivedRepairs(st.WorkspaceDir, "self-healing-feature")
-		if err := check("repairs.md archived with both plan-repair-1 and repair-1 rounds",
-			strings.Contains(repairsContent, "plan-repair-1") && strings.Contains(repairsContent, "repair-1")); err != nil {
+		if err := check("repairs.md archived with a plan-repair-1 round", repairsHasRound(repairsContent, "plan-repair-1")); err != nil {
+			return res, err
+		}
+		if err := check("repairs.md archived with a build repair-1 round", repairsHasRound(repairsContent, "repair-1")); err != nil {
 			return res, err
 		}
 
@@ -709,7 +711,7 @@ func runSingleScenario(ctx context.Context, stackDir, name string, out io.Writer
 		if err := check("retry-me initially quarantined as gate_failure", q1 != nil && q1.Status == "blocked" && q1.Reason == "gate_failure"); err != nil {
 			return res, err
 		}
-		// Switch build role to sim-agent-clean and dispatch with clock 2 hours in the future
+		// Switch build role to sim-agent-clean, which would integrate the change if it ran again
 		WriteAgentsYAML(st.WorkspaceDir,
 			[]string{"sim-agent-clean"},
 			map[string][]string{
@@ -721,26 +723,19 @@ func runSingleScenario(ctx context.Context, stackDir, name string, out io.Writer
 			nil,
 		)
 		commitWorkspaceConfig(ctx, st.WorkspaceDir, "heal build agent for retry")
-		disp, err := orchestrator.NewDispatcher(orchestrator.DispatcherOptions{
-			Root:       st.WorkspaceDir,
-			Store:      dbStore,
-			MaxWorkers: 1,
-			NowFunc:    func() time.Time { return time.Now().UTC().Add(2 * time.Hour) },
-		})
-		if err != nil {
+		// A dispatch inside blocked_changes.retry_after (1h) must leave the change blocked and its retries unchanged
+		if err := dispatchAndMergeAt(ctx, st.WorkspaceDir, dbStore, 30*time.Minute); err != nil {
 			return res, err
 		}
-		_ = disp.Run(ctx)
-		_ = disp.Close()
-		merger, err := orchestrator.NewMerger(orchestrator.MergerOptions{
-			Root:  st.WorkspaceDir,
-			Store: dbStore,
-		})
-		if err != nil {
+		qEarly, _ := dbStore.GetQuarantine(ctx, "retry-me")
+		if err := check("retry-me still blocked, retries unchanged, after a dispatch 30m into the 1h backoff",
+			stillBlockedWithRetries(qEarly, q1.Retries) && !isIntegrated(ctx, st.WorkspaceDir, "retry-me")); err != nil {
 			return res, err
 		}
-		_ = merger.Run(ctx)
-		_ = merger.Close()
+		// A dispatch past the backoff retries it
+		if err := dispatchAndMergeAt(ctx, st.WorkspaceDir, dbStore, 2*time.Hour); err != nil {
+			return res, err
+		}
 		if err := check("retry-me automatically retried after backoff and integrated", isIntegrated(ctx, st.WorkspaceDir, "retry-me")); err != nil {
 			return res, err
 		}
@@ -1284,6 +1279,48 @@ func isIntegrated(ctx context.Context, root, change string) bool {
 	}
 	ok, _ = repo.HasCommitWithTrailer("HEAD", change)
 	return ok
+}
+
+// dispatchAndMergeAt runs one dispatcher pass with its clock `ahead` of the real one, then one merger
+// pass, so a scenario can stand inside or past a backoff such as blocked_changes.retry_after.
+func dispatchAndMergeAt(ctx context.Context, root string, st *store.Store, ahead time.Duration) error {
+	disp, err := orchestrator.NewDispatcher(orchestrator.DispatcherOptions{
+		Root:       root,
+		Store:      st,
+		MaxWorkers: 1,
+		NowFunc:    func() time.Time { return time.Now().UTC().Add(ahead) },
+	})
+	if err != nil {
+		return err
+	}
+	_ = disp.Run(ctx)
+	_ = disp.Close()
+	merger, err := orchestrator.NewMerger(orchestrator.MergerOptions{
+		Root:  root,
+		Store: st,
+	})
+	if err != nil {
+		return err
+	}
+	_ = merger.Run(ctx)
+	return merger.Close()
+}
+
+// stillBlockedWithRetries reports whether q is a change still blocked with exactly `retries` automatic
+// retries counted: what a dispatch before the backoff must leave behind.
+func stillBlockedWithRetries(q *store.QuarantineRecord, retries int) bool {
+	return q != nil && q.Status == "blocked" && q.Retries == retries
+}
+
+// repairsHasRound reports whether repairs.md holds a round of that phase: a heading line
+// `## <phase>, <time>, <engine>`. The phase must match whole, because "plan-repair-1" contains "repair-1".
+func repairsHasRound(repairs, phase string) bool {
+	for _, line := range strings.Split(repairs, "\n") {
+		if strings.HasPrefix(line, "## "+phase+",") {
+			return true
+		}
+	}
+	return false
 }
 
 func findArchivedRepairs(root, change string) string {

@@ -373,7 +373,8 @@
       <div class="flex flex-col gap-2">
         <button class="btn btn-sm justify-start touch:min-h-11" data-post="/api/changes/{{$n}}/validate" data-title="Validation of the specs of {{$c.ChangeName}}">{{icon "shield-check"}}Validate the specs</button>
         <button class="btn btn-sm justify-start touch:min-h-11" data-post="/api/changes/{{$n}}/gates" data-toast="Gates started">{{icon "flask-conical"}}Run the gates</button>
-        <button class="btn btn-sm justify-start touch:min-h-11" data-post="/api/changes/{{$n}}/reset" data-danger="1" data-confirm="Remove the worktree of {{$c.ChangeName}}, its branch, its place in the merge queue, its block and its counters? The change starts again from the backlog, and what its worker built is lost." data-confirm-title="Reset the worker of {{$c.ChangeName}}?" data-confirm-ok="Reset it" data-toast="Reset {{$c.ChangeName}}">{{icon "trash-2"}}Reset the worker…</button>
+        {{if eq $c.State "merging"}}<p class="text-sm text-base-content/70">The merger is integrating this change from its worktree: it can be reset once that attempt ends.</p>
+        {{else}}<button class="btn btn-sm justify-start touch:min-h-11" data-post="/api/changes/{{$n}}/reset" data-danger="1" data-confirm="Remove the worktree of {{$c.ChangeName}}, its branch, its place in the merge queue, its block and its counters? The change starts again from the backlog, and what its worker built is lost." data-confirm-title="Reset the worker of {{$c.ChangeName}}?" data-confirm-ok="Reset it" data-toast="Reset {{$c.ChangeName}}">{{icon "trash-2"}}Reset the worker…</button>{{end}}
       </div>
     </section>
   </div>

@@ -456,6 +456,12 @@ func (c *changes) Reset(ctx context.Context, name string) (*store.ChangeRecord, 
 	if rec == nil && !isDir(worktreeOf(c.root, name)) {
 		return nil, errNotFound("the kit has no record of a change named %s, and no worktree of it", name)
 	}
+	// The merger fetches the child commits of the change from its worktree while it integrates it
+	// (an open merge attempt): removing it then breaks the attempt in progress. This is the state
+	// Abandon refuses too, and it is decided before anything is taken or touched.
+	if rec != nil && rec.State == store.ChangeMerging {
+		return nil, errConflict("the merger is integrating %s: it is reset once that attempt ends", name)
+	}
 	// The lease of the worker is held for the whole reset, not checked once: taking it fails while a
 	// live worker holds it, takes over the lease of a dead one, and makes a dispatcher that picks the
 	// change up meanwhile find it busy instead of building in a worktree this reset is deleting.

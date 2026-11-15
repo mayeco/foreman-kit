@@ -769,7 +769,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	stopHB := d.store.StartLockHeartbeat(ctx, "dispatcher", os.Getpid(), 2*time.Hour)
+	stopHB := d.store.StartLockHeartbeat(ctx, "dispatcher", os.Getpid(), leaseTTL)
 	defer func() {
 		stopHB()
 		_ = d.store.ReleaseLock(context.Background(), "dispatcher", os.Getpid())

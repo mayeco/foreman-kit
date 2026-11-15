@@ -213,7 +213,7 @@ func (m *Merger) Run(ctx context.Context) error {
 		return err
 	}
 	m.holdsLock = true
-	stopHB := m.store.StartLockHeartbeat(ctx, "merger", os.Getpid(), 2*time.Hour)
+	stopHB := m.store.StartLockHeartbeat(ctx, "merger", os.Getpid(), leaseTTL)
 	defer func() {
 		stopHB()
 		_ = m.store.ReleaseLock(context.Background(), "merger", os.Getpid())

@@ -34,6 +34,9 @@ const (
 	ExitNotInstalled = 127
 	// ExitConfig (78) indicates the call did not start: .foreman-kit/agents.yaml cannot be used.
 	ExitConfig = 78
+	// ExitWorkdirMissing (66) indicates the call did not start: its work directory does not exist
+	// or is not a directory. It says nothing of any agent, so it is not ExitNotInstalled.
+	ExitWorkdirMissing = 66
 )
 
 // QUOTA_PATTERN, ENGINE_CONFIG_PATTERN, and CONTEXT_OVERFLOW_PATTERN match usage limits, auth errors, and context window overflows.
@@ -299,6 +302,15 @@ func AgentExec(ctx context.Context, opts AgentExecOptions) (*AgentExecResult, er
 		workdir = absWorkdir
 	} else {
 		absWorkdir = workdir
+	}
+
+	// A work directory that is gone (a typo, a worktree the merger cleaned up while the call was
+	// being made) is not an agent that is missing: the call does not start, and nothing is recorded
+	// of any engine, or its cooldown would stop every call of its role.
+	if err := CheckWorkdir(workdir); err != nil {
+		msg := fmt.Sprintf("agent_exec: the call did not start: %v\n", err)
+		_, _ = io.WriteString(stderr, msg)
+		return &AgentExecResult{ExitCode: ExitWorkdirMissing, Output: msg}, err
 	}
 
 	appRoot := agentExecAppRoot(opts.AppRoot, workdir)

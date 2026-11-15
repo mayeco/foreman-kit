@@ -181,6 +181,22 @@ func sameWriter(a, b io.Writer) (same bool) {
 // write end of the output pipes.
 const outputDrainTimeout = 5 * time.Second
 
+// CheckWorkdir reports why dir cannot be the work directory of a command: it does not exist or it is
+// not a directory. The error names it. A start that fails for either reason reports "no such file or
+// directory" about the binary, which reads as a missing binary and, mapped to exit 127, as one.
+func CheckWorkdir(dir string) error {
+	info, err := os.Stat(dir)
+	switch {
+	case err == nil && info.IsDir():
+		return nil
+	case err == nil:
+		return fmt.Errorf("work directory %s is not a directory", dir)
+	case os.IsNotExist(err):
+		return fmt.Errorf("work directory %s does not exist", dir)
+	}
+	return fmt.Errorf("work directory %s cannot be used: %w", dir, err)
+}
+
 // RunBounded runs a command in its own process group (Setpgid: true), sending SIGTERM to -pid on cancellation
 // or timeout and SIGKILL after GracePeriod (60s by default), while streaming output to store.AppendLogChunk and
 // optionally monitoring inactivity via the idle watchdog. When the group leader exits, whatever it left running
@@ -199,6 +215,14 @@ func RunBounded(ctx context.Context, opts RunOptions, name string, args ...strin
 	streamName := opts.Stream
 	if streamName == "" {
 		streamName = "combined"
+	}
+
+	// Checked before anything starts: a directory that is missing makes the start fail with an error
+	// that names the binary, which the exit code below would take for a binary that is not there.
+	if opts.Dir != "" {
+		if err := CheckWorkdir(opts.Dir); err != nil {
+			return &RunResult{ExitCode: ExitWorkdirMissing}, err
+		}
 	}
 
 	runCtx := ctx

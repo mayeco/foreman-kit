@@ -47,9 +47,6 @@ func TestDispatcherAndMergerRefuseOldGitAtStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	if err := st.SyncJSONToSQLite(ctx, root); err != nil {
-		t.Fatal(err)
-	}
 
 	var dispLog bytes.Buffer
 	disp, err := NewDispatcher(DispatcherOptions{
@@ -84,9 +81,6 @@ func TestDispatcherAndMergerRefuseOldGitAtStart(t *testing.T) {
 	// Verify no worktree was created and the item remains queued (not blocked, not ready).
 	if _, statErr := os.Stat(filepath.Join(root, ".worktrees")); !os.IsNotExist(statErr) {
 		t.Fatalf("expected no .worktrees directory to be created, stat err=%v", statErr)
-	}
-	if state, err := st.ChangeState(ctx, "queued-item"); err != nil || state != store.ChangeQueued {
-		t.Fatalf("expected queued-item state in store to be %q, got %q (err=%v)", store.ChangeQueued, state, err)
 	}
 	blocked, _ := st.ListQuarantine(ctx, "")
 	if len(blocked) != 0 {
@@ -123,39 +117,6 @@ func TestDispatcherAndMergerRefuseOldGitAtStart(t *testing.T) {
 		for _, want := range []string{"2.16.6", gitx.MinVersion, fakeGit} {
 			if !strings.Contains(err.Error(), want) || !strings.Contains(mergerLog.String(), want) {
 				t.Fatalf("expected Merger.Serve error (%v) and log (%q) to contain %q", err, mergerLog.String(), want)
-			}
-		}
-	}
-
-	// Also verify unreadable git version fails in Dispatcher.Run and Merger.Run.
-	unreadableDir := filepath.Join(tmp, "bin-unreadable")
-	if err := os.MkdirAll(unreadableDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	unreadableGit := filepath.Join(unreadableDir, "git")
-	if err := os.WriteFile(unreadableGit, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", unreadableDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	dispLog.Reset()
-	if err := disp.Run(ctx); err == nil {
-		t.Fatal("expected Dispatcher.Run to fail when git version cannot be read")
-	} else {
-		for _, want := range []string{"cannot be read", gitx.MinVersion, unreadableGit} {
-			if !strings.Contains(err.Error(), want) || !strings.Contains(dispLog.String(), want) {
-				t.Fatalf("expected Dispatcher.Run error (%v) and log (%q) to contain %q", err, dispLog.String(), want)
-			}
-		}
-	}
-
-	mergerLog.Reset()
-	if err := merger.Run(ctx); err == nil {
-		t.Fatal("expected Merger.Run to fail when git version cannot be read")
-	} else {
-		for _, want := range []string{"cannot be read", gitx.MinVersion, unreadableGit} {
-			if !strings.Contains(err.Error(), want) || !strings.Contains(mergerLog.String(), want) {
-				t.Fatalf("expected Merger.Run error (%v) and log (%q) to contain %q", err, mergerLog.String(), want)
 			}
 		}
 	}

@@ -197,13 +197,15 @@ func TestCLICommandsFailOnGit2166(t *testing.T) {
 		}
 	}
 
-	// 2. foreman-kit dispatch, merge, cycle, -d, and foreman-kit alone (foreground daemon)
+	// 2. foreman-kit dispatch (also --dry-run), merge, run, cycle, -d, and foreman-kit alone (foreground daemon)
 	for _, tc := range []struct {
 		name string
 		args []string
 	}{
 		{name: "dispatch", args: []string{"dispatch"}},
+		{name: "dispatch-dry-run", args: []string{"dispatch", "--dry-run"}},
 		{name: "merge", args: []string{"merge"}},
+		{name: "run", args: []string{"run"}},
 		{name: "cycle", args: []string{"cycle"}},
 		{name: "-d", args: []string{"-d"}},
 		{name: "foreground-daemon", args: nil},
@@ -244,6 +246,7 @@ func TestCLICommandsFailOnUnreadableGitVersion(t *testing.T) {
 				{"preflight"},
 				{"dispatch"},
 				{"merge"},
+				{"run"},
 				{"cycle"},
 				{"-d"},
 			} {

@@ -603,6 +603,9 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			if hasHelpFlag(args) {
 				return cmd.Help()
 			}
+			if err := requireGit(ctx, "dispatch", stderr); err != nil {
+				return wrapCode(1)
+			}
 			if err := orchestrator.RunDispatchCLI(ctx, args, stdout, stderr); err != nil {
 				fmt.Fprintf(stderr, "dispatch: %v\n", err)
 				return wrapCode(1)
@@ -620,6 +623,9 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			if hasHelpFlag(args) {
 				return cmd.Help()
 			}
+			if err := requireGit(ctx, "merge", stderr); err != nil {
+				return wrapCode(1)
+			}
 			if err := orchestrator.RunMergeCLI(ctx, args, stdout, stderr); err != nil {
 				fmt.Fprintf(stderr, "merge: %v\n", err)
 				return wrapCode(1)
@@ -634,6 +640,9 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 		Use:   "run",
 		Short: "Run Dispatcher and Merger coordinated in a single process",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireGit(ctx, "run", stderr); err != nil {
+				return wrapCode(1)
+			}
 			root, st, err := openWorkspaceStore()
 			if err != nil {
 				fmt.Fprintf(stderr, "run: %v\n", err)
@@ -1387,6 +1396,18 @@ func takesValue(arg string) bool {
 		return true
 	}
 	return false
+}
+
+// requireGit refuses a command that needs git when the git on PATH is older than gitx.MinVersion or
+// its version cannot be read. It runs before the command opens a worktree, rebases, commits, pushes
+// or calls an agent, and prints the version found (or that it could not be read), the minimum and
+// the git's path.
+func requireGit(ctx context.Context, command string, stderr io.Writer) error {
+	if err := gitx.CheckVersion(ctx); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", command, err)
+		return err
+	}
+	return nil
 }
 
 func hasHelpFlag(args []string) bool {

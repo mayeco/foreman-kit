@@ -81,6 +81,9 @@ func TestStartingTheWorkOfTheKit(t *testing.T) {
 		if ex["kind"] != "portal_job" || ex["job_kind"] != operation {
 			t.Errorf("POST %s started %v, want the operation %s", address, ex, operation)
 		}
+		if operation == "gates" && ex["command_text"] != "foreman-kit gates --all" {
+			t.Errorf("POST %s recorded %q, want `foreman-kit gates --all`", address, ex["command_text"])
+		}
 		waitExecution(t, st, id)
 		waitWork(t, srv.exec, id)
 		if code, data, raw, _ := doReq(t, srv, http.MethodPost, address, map[string]any{"change": "add-api"}); code != http.StatusBadRequest {

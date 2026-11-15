@@ -113,21 +113,11 @@ func (k *execKit) run(ctx context.Context, dir string, args ...string) (string, 
 }
 
 func (k *execKit) RunOperation(ctx context.Context, dir, operation string) (string, int, error) {
-	switch {
-	case operation == "dispatch", operation == "merge":
-		return k.run(ctx, dir, operation)
-	case operation == "gates":
-		// At the root the main checkout is the base. The gates check what differs from HEAD unless
-		// they are told otherwise, and there nothing does: they are told to check every repository.
-		return k.run(ctx, dir, "gates", "--all")
-	case strings.HasPrefix(operation, "gates-"):
-		return k.run(ctx, dir, "gates")
-	case operation == "preflight":
-		return k.run(ctx, dir, "preflight")
-	case operation == "preflight-services":
-		return k.run(ctx, dir, "preflight", "--services")
+	args, known := kitArgs(operation)
+	if !known {
+		return "", 2, fmt.Errorf("no kit operation named %q", operation)
 	}
-	return "", 2, fmt.Errorf("no kit operation named %q", operation)
+	return k.run(ctx, dir, args...)
 }
 
 func (k *execKit) RunAgent(ctx context.Context, workdir, engine, prompt string) (string, int, error) {

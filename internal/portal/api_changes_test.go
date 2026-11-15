@@ -115,6 +115,9 @@ func TestTheActionsOfAChange(t *testing.T) {
 	if ex["job_kind"] != "gates-add-search" || ex["change_name"] != "add-search" || !strings.HasSuffix(asStr(ex["workdir"]), "worker-add-search") {
 		t.Errorf("the gates of the worktree started %v", ex)
 	}
+	if ex["command_text"] != "foreman-kit gates" {
+		t.Errorf("the gates of the worktree were recorded as %q, want `foreman-kit gates` with no --all", ex["command_text"])
+	}
 	waitExecution(t, st, gatesID)
 	waitWork(t, srv.exec, gatesID)
 	refuses(t, srv, "/api/changes/add-ui/gates", nil, http.StatusConflict, "conflict")

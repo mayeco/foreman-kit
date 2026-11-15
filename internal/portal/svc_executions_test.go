@@ -219,6 +219,81 @@ func TestAnOperationOfTheKitRunsUnderItsName(t *testing.T) {
 	}
 }
 
+// What an execution records as its command is what the kit ran: for every operation the portal
+// starts, with and without a change, the recorded command is `foreman-kit ` and the arguments the
+// kit was run with, and the prompt a person reads back is that command.
+func TestTheCommandRecordedForAnOperationIsTheOneTheKitRuns(t *testing.T) {
+	_, st, root := setupTestPortal(t)
+	ctx := context.Background()
+	exe := writeExecutable(t, t.TempDir(), "foreman-kit", `echo "ran:$*"`)
+	x := newExecutions(root, st, NewKit(st, exe))
+
+	wt := filepath.Join(root, ".worktrees", "worker-demo")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	type start struct{ operation, change string }
+	var starts []start
+	for operation := range kitOperations {
+		starts = append(starts, start{operation, ""})
+	}
+	starts = append(starts, start{"gates", "demo"})
+	if len(starts) != len(kitOperations)+1 {
+		t.Fatalf("the starts to try are %v", starts)
+	}
+
+	for _, in := range starts {
+		ex, err := x.StartOperation(ctx, in.operation, in.change)
+		if err != nil {
+			t.Fatalf("starting %+v: %v", in, err)
+		}
+		done := waitExecution(t, st, ex.ExecID)
+		waitWork(t, x, ex.ExecID)
+		out, err := st.ReadFullLog(ctx, ex.ExecID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ran := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "ran:"))
+		if done.Status != "succeeded" || !strings.HasPrefix(out, "ran:") {
+			t.Fatalf("%+v ended as %s with the output %q", in, done.Status, out)
+		}
+		if want := "foreman-kit " + ran; ex.CommandText != want || done.CommandText != want {
+			t.Errorf("%+v recorded the command %q (stored %q), but the kit ran `foreman-kit %s`", in, ex.CommandText, done.CommandText, ran)
+		}
+		if done.PromptText != done.CommandText {
+			t.Errorf("%+v shows the prompt %q, want the command %q", in, done.PromptText, done.CommandText)
+		}
+	}
+}
+
+// The gates of a change check what the change touched, and are recorded as the kit ran them; the
+// gates on the base check every repository, and say so.
+func TestTheGatesOfAChangeAreNotRecordedAsTheGatesOfEveryRepository(t *testing.T) {
+	srv, st, root := setupTestPortal(t)
+	ctx := context.Background()
+	if err := os.MkdirAll(filepath.Join(root, ".worktrees", "worker-demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inChange, err := srv.exec.StartOperation(ctx, "gates", "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	onBase, err := srv.exec.StartOperation(ctx, "gates", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{inChange.ExecID, onBase.ExecID} {
+		waitExecution(t, st, id)
+		waitWork(t, srv.exec, id)
+	}
+	if inChange.CommandText != "foreman-kit gates" || strings.Contains(inChange.CommandText, "--all") {
+		t.Errorf("the gates of a change were recorded as %q, want `foreman-kit gates`", inChange.CommandText)
+	}
+	if onBase.CommandText != "foreman-kit gates --all" {
+		t.Errorf("the gates on the base were recorded as %q, want `foreman-kit gates --all`", onBase.CommandText)
+	}
+}
+
 func TestAFollowUpContinuesARunAndARerunRepeatsIt(t *testing.T) {
 	srv, st, _ := setupTestPortal(t)
 	ctx := context.Background()

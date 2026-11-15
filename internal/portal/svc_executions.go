@@ -50,13 +50,39 @@ func newExecutions(root string, st *store.Store, kit Kit) *executions {
 // SIGTERM reports.
 const stoppedExitCode = 143
 
-// The operations of the kit the portal can start, and how each is named in the list of executions.
-var kitOperations = map[string]string{
-	"dispatch":           "foreman-kit dispatch",
-	"merge":              "foreman-kit merge",
-	"gates":              "foreman-kit gates --all",
-	"preflight":          "foreman-kit preflight",
-	"preflight-services": "foreman-kit preflight --services",
+// The operations of the kit the portal can start, each with the arguments the kit runs it with. The
+// command an execution records is built from these same arguments, so that what a person reads is
+// what ran.
+var kitOperations = map[string][]string{
+	"dispatch": {"dispatch"},
+	"merge":    {"merge"},
+	// At the root the main checkout is the base. The gates check what differs from HEAD unless they
+	// are told otherwise, and there nothing does: they are told to check every repository.
+	"gates":              {"gates", "--all"},
+	"preflight":          {"preflight"},
+	"preflight-services": {"preflight", "--services"},
+}
+
+// changeGatesPrefix starts the name of the gates of a change, which run in its worktree.
+const changeGatesPrefix = "gates-"
+
+// changeGatesArgs are the arguments of the gates of a change. In its worktree they check the
+// repositories the change touched, as they do when they are told nothing.
+var changeGatesArgs = []string{"gates"}
+
+// kitArgs returns the arguments the kit runs an operation with, the operation named as its execution
+// carries it: one of kitOperations, or "gates-<change>".
+func kitArgs(operation string) ([]string, bool) {
+	if strings.HasPrefix(operation, changeGatesPrefix) {
+		return changeGatesArgs, true
+	}
+	args, known := kitOperations[operation]
+	return args, known
+}
+
+// kitCommand is the command an execution records for an operation run with args.
+func kitCommand(args []string) string {
+	return strings.Join(append([]string{"foreman-kit"}, args...), " ")
 }
 
 // ---- shutdown --------------------------------------------------------------------------------
@@ -362,8 +388,7 @@ func (x *executions) startAgent(ctx context.Context, in AgentRun) (store.Executi
 // created. The operation is one of kitOperations at the root of the workspace; with a change, it is
 // "gates" in the worktree of that change.
 func (x *executions) StartOperation(ctx context.Context, operation, change string) (store.Execution, error) {
-	command, known := kitOperations[operation]
-	if !known {
+	if _, known := kitOperations[operation]; !known {
 		return store.Execution{}, errInvalid("%q is not an operation the portal starts", operation)
 	}
 	name := operation
@@ -371,8 +396,9 @@ func (x *executions) StartOperation(ctx context.Context, operation, change strin
 		if operation != "gates" {
 			return store.Execution{}, errInvalid("only the gates run in the worktree of a change")
 		}
-		name = "gates-" + change
+		name = changeGatesPrefix + change
 	}
+	args, _ := kitArgs(name)
 	dir, err := x.workdirOf(change)
 	if err != nil {
 		return store.Execution{}, err
@@ -385,7 +411,7 @@ func (x *executions) StartOperation(ctx context.Context, operation, change strin
 		ChangeName:  change,
 		Phase:       name,
 		JobKind:     name,
-		CommandText: command,
+		CommandText: kitCommand(args),
 		Status:      "running",
 		PID:         os.Getpid(),
 		Workdir:     dir,

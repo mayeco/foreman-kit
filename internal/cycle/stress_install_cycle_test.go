@@ -986,7 +986,7 @@ func TestStressInstallScenarios_I1_to_I35(t *testing.T) {
 //   - SyncRepos restoring a backlog holding a version origin published since HEAD (S12)
 //   - WithRecordLock reclaiming dead PID locks and timing out behind live locks (S14)
 //   - Push retry on transient pre-receive rejection (S18)
-//   - Non-JSON backlog fallback to 3-way text merge (S20)
+//   - Non-JSON backlog restored, rest recorded through the push retry (S20)
 //   - SaveUnpublishedCommit under refs/openspec/unpublished/... when commit (index.lock) or push fails,
 //     and stale index.lock cleanup (>10m) vs young index.lock refusal (S6, S7, S21, S22)
 //   - ScopeGuard pausing the workspace in SQLite and log/PAUSE on out-of-scope edits
@@ -1530,19 +1530,29 @@ func TestStressScenarioS_FullReconciliationAndGitFailures(t *testing.T) {
 		t.Fatalf("S18: expected Rejected once lesson on origin")
 	}
 
-	// S20: Non-JSON backlog merges as text without losing or blocking the record
+	// S20: A non-JSON backlog is never published: the record restores it to the base's version and
+	// still publishes the rest, through the push retry and its 3-way merge with a late remote push.
 	_, _ = gitx.RunGit(ctx, ws, "fetch", "-q", "origin")
 	origHead, _ = gitx.RunGit(ctx, ws, "rev-parse", "origin/master")
 	_ = PrepareSessionWorktree(ctx, ws, cw, strings.TrimSpace(origHead), "master", io.Discard)
+	backlogBeforeS20 := originBlob(BacklogFile)
 	otherSync()
 	_ = os.WriteFile(memPath(other), []byte(originBlob(memRel)+"- late remote s20\n"), 0o644)
 	otherPush("other: late s20")
+	_ = os.WriteFile(memPath(cw), []byte(readText(t, memPath(cw))+"- local s20 lesson\n"), 0o644)
 	_ = os.WriteFile(filepath.Join(cw, BacklogFile), []byte("[\n  not valid json\n"), 0o644)
-	if err := RecordSession(ctx, cw, "master", "chore(memory): s20 record", st, io.Discard); err != nil {
-		t.Fatalf("S20: expected non-JSON backlog to merge as text and publish: %v", err)
+	var s20 bytes.Buffer
+	if err := RecordSession(ctx, cw, "master", "chore(memory): s20 record", st, &s20); err != nil {
+		t.Fatalf("S20: expected the record to publish the rest despite a non-JSON backlog: %v\n%s", err, s20.String())
 	}
-	if !strings.Contains(originBlob(BacklogFile), "not valid json") {
-		t.Fatalf("S20: expected non-JSON backlog content on origin")
+	if got := originBlob(BacklogFile); strings.Contains(got, "not valid json") || got != backlogBeforeS20 {
+		t.Fatalf("S20: expected origin to keep its valid backlog, got:\n%s", got)
+	}
+	if mem := originBlob(memRel); !strings.Contains(mem, "late remote s20") || !strings.Contains(mem, "local s20 lesson") {
+		t.Fatalf("S20: expected both the late remote lesson and the session's lesson on origin, got:\n%s", mem)
+	}
+	if !strings.Contains(s20.String(), "record: "+BacklogFile+" is not a valid JSON list") {
+		t.Fatalf("S20: expected the record to name the rejected backlog:\n%s", s20.String())
 	}
 	// Restore valid JSON backlog on origin
 	otherSync()

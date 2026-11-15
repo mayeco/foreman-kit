@@ -848,9 +848,18 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	fmt.Fprintln(lw, "== record")
 	if dirExists(filepath.Join(cycleWT, ".git")) || fileExists(filepath.Join(cycleWT, ".git")) {
 		_ = WithRecordLock(ctx, st, 30*time.Minute, func() error {
-			if err := RecordSession(ctx, cycleWT, baseBranch, "chore(memory): scheduled cycle "+stamp, st, lw); err == nil {
+			rejected, err := recordSession(ctx, cycleWT, baseBranch, "chore(memory): scheduled cycle "+stamp, st, lw)
+			if err == nil {
 				if ActiveVisualSession(ctx, st) == "" && carriedEdits != "" {
 					_ = ReleaseScopeEdits(ctx, root, carriedEdits)
+				}
+			}
+			// What the record did not publish is said in the report the judgment wrote, beside its findings.
+			if len(rejected) > 0 {
+				if report := findCycleReport(filepath.Join(cycleDir, "reports"), stamp, cycleBegan); report != "" {
+					if err := appendNotRecorded(report, rejected); err != nil {
+						fmt.Fprintf(lw, "record: the report %s does not say what was not recorded: %v\n", report, err)
+					}
 				}
 			}
 			if ActiveVisualSession(ctx, st) == "" {

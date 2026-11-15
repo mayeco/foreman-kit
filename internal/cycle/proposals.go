@@ -1747,20 +1747,27 @@ func WithRecordLock(ctx context.Context, st *store.Store, ttl time.Duration, fn 
 // RecordSession commits changes in RecordedPaths and pushes them to origin/<baseBranch> (with 3-way rebase fallback).
 // If committing or pushing fails, it saves the commit under refs/openspec/unpublished/<worktree>-<stamp> using gitx.SaveUnpublishedCommit.
 func RecordSession(ctx context.Context, dir, baseBranch, message string, st *store.Store, out io.Writer) error {
+	_, err := recordSession(ctx, dir, baseBranch, message, st, out)
+	return err
+}
+
+// recordSession is RecordSession, and also returns the JSON list files the record did not publish
+// because they do not parse as lists (restoreInvalidLists): the cycle names them in its report.
+func recordSession(ctx context.Context, dir, baseBranch, message string, st *store.Store, out io.Writer) ([]rejectedList, error) {
 	if out == nil {
 		out = io.Discard
 	}
 	if baseBranch == "" {
 		var err error
 		if baseBranch, err = RequireBaseBranch(dir); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	remote := settings.RemoteName(dir)
 	// The push below publishes every commit HEAD carries, not only the record: refuse commits that
 	// change anything outside the recorded scope.
 	if err := refuseUnscopedCommits(ctx, dir, remote+"/"+baseBranch, "record", st, out); err != nil {
-		return err
+		return nil, err
 	}
 
 	// The memory is committed in the form agent-memory writes it in (memory.Normalize): a checkout
@@ -1774,21 +1781,30 @@ func RecordSession(ctx context.Context, dir, baseBranch, message string, st *sto
 			len(staged), dir, strings.Join(staged, ", "), memory.Binary)
 	}
 
+	// A JSON list the dispatcher or the next session could not read is never published: it is restored
+	// to the version HEAD holds, its content kept aside, and the rest is recorded as before. Done before
+	// the status below, so that a session whose only change was such a file has nothing to record.
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	rejected, err := restoreInvalidLists(ctx, dir, stamp, out)
+	if err != nil {
+		fmt.Fprintln(out, err)
+		return rejected, err
+	}
+
 	statusPaths := append(append([]string{}, RecordedPaths...), RotatedHistoryRelPaths(dir)...)
 	statusArgs := append([]string{"status", "--porcelain", "-uall", "--"}, statusPaths...)
 	statusOut, err := gitx.RunGit(ctx, dir, statusArgs...)
 	if err == nil && strings.TrimSpace(statusOut) == "" {
 		fmt.Fprintln(out, "record: nothing to record")
-		return nil
+		return rejected, nil
 	}
 
 	repo, err := gitx.Open(dir)
 	if err != nil {
-		return err
+		return rejected, err
 	}
 
 	changedRelPaths := collectChangedRecordedFiles(ctx, dir)
-	stamp := time.Now().UTC().Format("20060102T150405Z")
 	wtBase := filepath.Base(dir)
 
 	var stage []string
@@ -1799,7 +1815,7 @@ func RecordSession(ctx context.Context, dir, baseBranch, message string, st *sto
 		}
 		tracked, err := isTrackedInGit(ctx, dir, p)
 		if err != nil {
-			return err
+			return rejected, err
 		}
 		if tracked {
 			stage = append(stage, p)
@@ -1820,21 +1836,21 @@ func RecordSession(ctx context.Context, dir, baseBranch, message string, st *sto
 		refName := fmt.Sprintf("refs/openspec/unpublished/%s-%s", wtBase, stamp)
 		sha, saveErr := repo.SaveUnpublishedCommit(refName, message, changedRelPaths)
 		if saveErr != nil {
-			return fmt.Errorf("record: commit failed and SaveUnpublishedCommit failed: %w", saveErr)
+			return rejected, fmt.Errorf("record: commit failed and SaveUnpublishedCommit failed: %w", saveErr)
 		}
 		fmt.Fprintf(out, "record: git refused the commit; kept as %s (%s)\n", refName, sha[:minInt(8, len(sha))])
-		return fmt.Errorf("record: git refused the commit; kept as %s", refName)
+		return rejected, fmt.Errorf("record: git refused the commit; kept as %s", refName)
 	}
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		if err := repo.Push(ctx, remote, "HEAD:refs/heads/"+baseBranch); err == nil {
 			_, _ = gitx.RunGit(ctx, dir, "submodule", "update", "--init", "--quiet")
-			return nil
+			return rejected, nil
 		}
 		if rebErr := RebaseProposals(ctx, dir, baseBranch, out); rebErr == nil {
 			if err := repo.Push(ctx, remote, "HEAD:refs/heads/"+baseBranch); err == nil {
 				_, _ = gitx.RunGit(ctx, dir, "submodule", "update", "--init", "--quiet")
-				return nil
+				return rejected, nil
 			}
 		}
 	}
@@ -1852,7 +1868,7 @@ func RecordSession(ctx context.Context, dir, baseBranch, message string, st *sto
 	} else {
 		fmt.Fprintf(out, "record: not published; kept in %s for the next session to publish\n", dir)
 	}
-	return fmt.Errorf("record: could not push to %s/%s", remote, baseBranch)
+	return rejected, fmt.Errorf("record: could not push to %s/%s", remote, baseBranch)
 }
 
 func collectChangedRecordedFiles(ctx context.Context, dir string) []string {

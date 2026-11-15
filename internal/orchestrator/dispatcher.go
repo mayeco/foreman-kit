@@ -19,7 +19,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/mayeco/foreman-kit/internal/assets"
 	"github.com/mayeco/foreman-kit/internal/config"
 	"github.com/mayeco/foreman-kit/internal/evaluator"
 	"github.com/mayeco/foreman-kit/internal/gitx"
@@ -2072,17 +2071,7 @@ func (d *Dispatcher) claimedCapabilities(change string, item BacklogItem) []stri
 }
 
 func (d *Dispatcher) capabilities(wt, change string) []string {
-	specsDir := filepath.Join(wt, "openspec", "changes", change, "specs")
-	files := listSpecFiles(specsDir)
-	var caps []string
-	for _, f := range files {
-		rel, err := filepath.Rel(specsDir, filepath.Dir(f))
-		if err == nil {
-			caps = append(caps, filepath.ToSlash(rel))
-		}
-	}
-	sort.Strings(caps)
-	return caps
+	return ChangeCapabilities(wt, change)
 }
 
 func (d *Dispatcher) capabilitiesWithLocks(wt, change string, locks []string) []string {
@@ -4086,60 +4075,30 @@ func (d *Dispatcher) triageAgentOutcome(ctx context.Context, change, phase, role
 
 func (d *Dispatcher) buildPlanPrompt(item BacklogItem, wt, feedback string, retried map[string]any) (string, string) {
 	change := item.ChangeName
-	goal := sanitizeBacklogText(item.Description)
-	if goal == "" {
-		goal = sanitizeBacklogText(item.Why)
-	}
-	if goal == "" {
-		goal = change
-	}
-	_, memBlock := MemoryFingerprintAndPromptBlock(wt, d.capabilities(wt, change))
-	rules, _ := assets.ReadTemplate(d.root, "authoring_rules.md")
-	rendered, ver := RenderPrompt(d.root, "plan", map[string]string{
-		"change":          change,
-		"goal":            goal,
-		"memory":          memBlock,
-		"evaluator_hint":  d.evaluatorHint(),
-		"authoring_rules": string(rules),
-		"feedback":        d.feedbackBlock(feedback, retried),
-	})
+	vars := WorkerPromptVars(d.root, wt, "plan", item, d.judge)
+	vars["feedback"] = d.feedbackBlock(feedback, retried)
+	rendered, ver := RenderPrompt(d.root, "plan", vars)
 	_ = d.saveWorkerPrompt(change, "plan", rendered)
 	return rendered, ver
 }
 
 func (d *Dispatcher) buildApplyPrompt(item BacklogItem, wt, branch, feedback, rebuild string, retried map[string]any) (string, string) {
 	change := item.ChangeName
-	_, memBlock := MemoryFingerprintAndPromptBlock(wt, d.capabilities(wt, change))
-	rules, _ := assets.ReadTemplate(d.root, "authoring_rules.md")
 	rebBlock := ""
 	if rebuild != "" {
 		rebBlock = "\nThis change is being built again on the current base branch:\n" + rebuild
 	}
-	rendered, ver := RenderPrompt(d.root, "build", map[string]string{
-		"change":          change,
-		"branch":          branch,
-		"memory":          memBlock,
-		"evaluator_hint":  d.evaluatorHint(),
-		"authoring_rules": string(rules),
-		"feedback":        d.feedbackBlock(feedback, retried),
-		"rebuild":         rebBlock,
-	})
+	vars := WorkerPromptVars(d.root, wt, "build", item, d.judge)
+	vars["branch"] = branch
+	vars["feedback"] = d.feedbackBlock(feedback, retried)
+	vars["rebuild"] = rebBlock
+	rendered, ver := RenderPrompt(d.root, "build", vars)
 	_ = d.saveWorkerPrompt(change, "build", rendered)
 	return rendered, ver
 }
 
 func (d *Dispatcher) evaluatorHint() string {
-	if settings.EvaluatorOffForThisRun() || d.judge == nil || !d.judge.Available() {
-		return ""
-	}
-	return fmt.Sprintf(
-		"\nWhen a yes/no judgment cannot be settled by running code (for example: does this test assert the THEN "+
-			"clause of that scenario?), ask the evaluator, a calibrated judge that answers with a probability instead of text:\n"+
-			"`jev noul \"<question>\" --true \"<what yes means>\" --false \"<what no means>\" --state-file <file> --model %s --field noul`\n"+
-			"0.7 or more means yes, 0.3 or less means no, anything in between means it cannot tell. Never pass "+
-			"secrets, .env files or credentials as state: the state is sent to the TypeSafe API.\n",
-		d.judge.Policy().EffectiveModel(),
-	)
+	return EvaluatorHint(d.judge)
 }
 
 // maxFeedbackBytes bounds the failure quoted in a repair prompt. Every engine command receives the whole

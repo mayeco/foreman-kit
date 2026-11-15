@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mayeco/foreman-kit/internal/assets"
 	"github.com/mayeco/foreman-kit/internal/cycle"
+	"github.com/mayeco/foreman-kit/internal/evaluator"
 	"github.com/mayeco/foreman-kit/internal/gitx"
 	"github.com/mayeco/foreman-kit/internal/orchestrator"
 	"github.com/mayeco/foreman-kit/internal/settings"
@@ -303,26 +303,30 @@ func (c *changes) HasWorktree(change string) bool {
 
 // RenderedPrompt returns the PLAN or the BUILD prompt of a change as the kit would write it now,
 // from the templates and the memory of this application: what a worker starting now would be given,
-// before what only its run knows (the feedback of a failed gate, the reason of a rebuild).
-func (c *changes) RenderedPrompt(change, role string) (string, error) {
+// before what only its run knows (the feedback of a failed gate, the reason of a rebuild). Its goal,
+// evaluator hint and memory block come from the same helper the dispatcher builds its prompts with
+// (orchestrator.WorkerPromptVars), from the description of the change on record (the caller reads it
+// within its own snapshot of the store: this reads nothing there) and its worktree.
+func (c *changes) RenderedPrompt(change, role, description string) (string, error) {
 	if !cycle.ChangeNameRe.MatchString(change) {
 		return "", errInvalid("%q is not the name of a change", change)
 	}
 	if role != "plan" && role != "build" {
 		return "", errInvalid("%q is not a prompt of a worker: plan or build", role)
 	}
-	// A template that cannot be read leaves its rules out of the prompt; the prompt is still rendered.
-	rules, _ := assets.ReadTemplate(c.root, "authoring_rules.md")
-	return cycle.RenderPrompt(c.root, role, map[string]string{
-		"change":          change,
-		"goal":            "",
-		"branch":          "feat/spec-" + change,
-		"memory":          cycle.MemoryPromptBlock(c.root, nil),
-		"evaluator_hint":  "",
-		"authoring_rules": string(rules),
-		"feedback":        "",
-		"rebuild":         "",
-	})
+	item := orchestrator.BacklogItem{ChangeName: change, Description: description}
+	// The worker reads the memory of its worktree; a change with none yet gets the memory of the application.
+	wt := c.root
+	if c.HasWorktree(change) {
+		wt = worktreeOf(c.root, change)
+	}
+	// An evaluator that cannot be loaded leaves its hint out of the prompt; the prompt is still rendered.
+	judge, _ := evaluator.NewJudge(c.root, c.store)
+	vars := orchestrator.WorkerPromptVars(c.root, wt, role, item, judge)
+	vars["branch"] = "feat/spec-" + change
+	vars["feedback"] = ""
+	vars["rebuild"] = ""
+	return cycle.RenderPrompt(c.root, role, vars)
 }
 
 // ---- what a person decides about a change -----------------------------------------------------------

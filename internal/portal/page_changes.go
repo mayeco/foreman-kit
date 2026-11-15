@@ -377,7 +377,7 @@ func (s *Server) readChangeIntervene(ctx context.Context, db *store.View, r *htt
 	switch from := strings.TrimSpace(r.URL.Query().Get("from")); from {
 	case "":
 	case "plan", "build":
-		if p.Prompt, err = s.changes.RenderedPrompt(name, from); err != nil {
+		if p.Prompt, err = s.changes.RenderedPrompt(name, from, head.Description); err != nil {
 			return nil, err
 		}
 		p.From = from

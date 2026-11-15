@@ -284,7 +284,10 @@ type RunningExecution struct {
 	ChangeName string
 	Phase      string
 	PID        int
-	PGIDs      []int
+	// StartedAt is when the execution began, in Unix seconds: the orchestrator that started it was
+	// already running then, which tells it from a later process given the same process ID.
+	StartedAt int64
+	PGIDs     []int
 	// PGIDRecordedAt is when each process group was recorded, in Unix seconds.
 	PGIDRecordedAt map[int]int64
 }
@@ -293,7 +296,7 @@ type RunningExecution struct {
 func (s *Store) ListRunningExecutions(ctx context.Context) ([]RunningExecution, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT e.exec_id, e.kind, coalesce(e.change_name, ''), coalesce(e.phase, ''), coalesce(e.pid, 0),
-		       g.pgid, g.recorded_at
+		       e.started_at, g.pgid, g.recorded_at
 		FROM executions e
 		LEFT JOIN execution_process_groups g ON g.exec_id = e.exec_id
 		WHERE e.status = 'running'
@@ -308,9 +311,11 @@ func (s *Store) ListRunningExecutions(ctx context.Context) ([]RunningExecution, 
 	for rows.Next() {
 		var e RunningExecution
 		var pgid, recordedAt sql.NullInt64
-		if err := rows.Scan(&e.ExecID, &e.Kind, &e.ChangeName, &e.Phase, &e.PID, &pgid, &recordedAt); err != nil {
+		var startedMS int64
+		if err := rows.Scan(&e.ExecID, &e.Kind, &e.ChangeName, &e.Phase, &e.PID, &startedMS, &pgid, &recordedAt); err != nil {
 			return nil, err
 		}
+		e.StartedAt = startedMS / 1000
 		i, ok := index[e.ExecID]
 		if !ok {
 			index[e.ExecID] = len(out)

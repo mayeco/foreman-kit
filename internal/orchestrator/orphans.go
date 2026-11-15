@@ -33,8 +33,9 @@ func reapOrphanAgents(ctx context.Context, st *store.Store, logf func(string, ..
 		return 0
 	}
 	stopped := 0
+	starts := make(map[int]int64)
 	for _, e := range running {
-		if e.PID <= 0 || e.PID == os.Getpid() || store.IsPIDAlive(e.PID) {
+		if !orchestratorGone(e, starts) {
 			continue
 		}
 		var groups []int
@@ -80,6 +81,30 @@ func reapOrphanAgents(ctx context.Context, st *store.Store, logf func(string, ..
 		_ = st.FinishExecution(ctx, e.ExecID, "stopped", -1)
 	}
 	return stopped
+}
+
+// orchestratorGone reports whether the orchestrator that started execution e is dead: its process ID
+// is not alive, or the process now holding it (this one included) started after the execution began,
+// so the system gave the ID to another program, or to the new daemon, once the orchestrator died. A
+// live process that started before its execution is the orchestrator. Without a readable start time
+// or a start time of the execution nothing says otherwise, and the process is taken for it, as the
+// lock code does. starts caches each process ID's start time for one pass (on macOS a lookup runs ps).
+func orchestratorGone(e store.RunningExecution, starts map[int]int64) bool {
+	if e.PID <= 0 {
+		return false
+	}
+	if e.PID != os.Getpid() && !store.IsPIDAlive(e.PID) {
+		return true
+	}
+	if e.StartedAt <= 0 {
+		return false
+	}
+	started, ok := starts[e.PID]
+	if !ok {
+		started = store.ProcessStartUnix(e.PID)
+		starts[e.PID] = started
+	}
+	return started > e.StartedAt+recordedLeaderStartSlack
 }
 
 // processGroupAlive reports whether any process of group pgid is alive.

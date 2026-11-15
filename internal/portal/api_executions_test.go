@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -568,6 +569,151 @@ func TestTheStreamOfAnOutput(t *testing.T) {
 	}
 	if code, _, _, _ := doReq(t, srv, http.MethodGet, "/api/executions/"+id+"/log/stream?after=soon", nil); code != http.StatusBadRequest {
 		t.Errorf("a stream asked to start at no chunk = %d, want 400", code)
+	}
+}
+
+// openLogStream connects to the stream of the output of the execution id and returns the response.
+// The connection is closed with the test, or after limit.
+func openLogStream(t *testing.T, ts *httptest.Server, id string, limit time.Duration) *http.Response {
+	t.Helper()
+	reqCtx, cancel := context.WithTimeout(context.Background(), limit)
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, ts.URL+"/api/executions/"+id+"/log/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the stream answered %d", resp.StatusCode)
+	}
+	return resp
+}
+
+// deadPID returns the pid of a process that has ended.
+func deadPID(t *testing.T) int {
+	t.Helper()
+	gone := exec.Command("true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return gone.Process.Pid
+}
+
+// TestTheStreamOfAnOrphanedExecutionEnds: an execution recorded as running whose process is gone
+// ended without recording how. Its stream sends the output on record, says the owner is gone and
+// closes, and leaves the record as it was: a GET writes nothing.
+func TestTheStreamOfAnOrphanedExecutionEnds(t *testing.T) {
+	srv, st, _ := setupTestPortal(t)
+	ctx := context.Background()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	const id = "run-orphaned"
+	if err := st.CreateExecution(ctx, store.Execution{ExecID: id, Kind: "portal_run", EnginesRequested: "stub", PromptText: "sleep please", PID: deadPID(t)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLogChunk(ctx, id, "combined", "old chunk\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := time.Now()
+	resp := openLogStream(t, ts, id, 20*time.Second)
+	got := readSSE(t, bufio.NewScanner(resp.Body), nil) // returns when the stream closes
+	if time.Since(started) > 5*time.Second {
+		t.Errorf("the stream of an execution whose owner is gone took %s to close", time.Since(started))
+	}
+	if len(got) != 2 || got[0].event != "log" || !strings.Contains(got[0].data, "old chunk") || got[1].event != "done" ||
+		!strings.Contains(got[1].data, `"owner_gone":true`) || !strings.Contains(got[1].data, `"status":"running"`) {
+		t.Fatalf("the stream sent %+v, want the chunk on record and a done that says the owner is gone", got)
+	}
+
+	ex, err := st.GetExecution(ctx, id)
+	if err != nil || ex == nil || ex.Status != "running" || ex.FinishedAt != "" {
+		t.Errorf("the record after the stream = %+v, %v, want it still running and open", ex, err)
+	}
+}
+
+// TestTheStreamOfAnExecutionThisProcessRunsStaysOpen: an execution this process runs is never taken
+// for one whose owner is gone, whatever pid is recorded: its stream goes on past the poll and sends
+// what is written meanwhile.
+func TestTheStreamOfAnExecutionThisProcessRunsStaysOpen(t *testing.T) {
+	srv, st, _ := setupTestPortal(t)
+	ctx := context.Background()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	const id = "run-owned"
+	if err := st.CreateExecution(ctx, store.Execution{ExecID: id, Kind: "portal_run", EnginesRequested: "stub", PromptText: "sleep please", PID: deadPID(t)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLogChunk(ctx, id, "combined", "first\n"); err != nil {
+		t.Fatal(err)
+	}
+	re := srv.exec.register(id, func() {})
+	defer srv.exec.unregister(id, re)
+
+	scanner := bufio.NewScanner(openLogStream(t, ts, id, 20*time.Second).Body)
+	if first := readSSE(t, scanner, func(sseMessage) bool { return true }); len(first) != 1 || first[0].event != "log" {
+		t.Fatalf("the stream sent %+v first, want the chunk on record", first)
+	}
+	type result struct{ msgs []sseMessage }
+	next := make(chan result, 1)
+	go func() { next <- result{readSSE(t, scanner, func(sseMessage) bool { return true })} }()
+	select {
+	case r := <-next:
+		t.Fatalf("the stream of an execution this process runs sent %+v instead of staying open", r.msgs)
+	case <-time.After(10 * logStreamPoll):
+	}
+	if err := st.AppendLogChunk(ctx, id, "combined", "second\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-next:
+		if len(r.msgs) != 1 || r.msgs[0].event != "log" || !strings.Contains(r.msgs[0].data, "second") {
+			t.Errorf("the chunk written while the stream was open arrived as %+v", r.msgs)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the chunk written while the stream was open did not arrive")
+	}
+}
+
+// TestTheStreamDrainsAStoppedExecution: the stop of an execution this process runs is recorded at
+// once, while its work may still be writing its last output: the stream sends that output before it
+// says the execution ended.
+func TestTheStreamDrainsAStoppedExecution(t *testing.T) {
+	srv, st, _ := setupTestPortal(t)
+	ctx := context.Background()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	const id = "run-stopped"
+	if err := st.CreateExecution(ctx, store.Execution{ExecID: id, Kind: "portal_run", EnginesRequested: "stub", PromptText: "stop me"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendLogChunk(ctx, id, "combined", "before the stop\n"); err != nil {
+		t.Fatal(err)
+	}
+	re := srv.exec.register(id, func() {})
+	defer srv.exec.unregister(id, re)
+	if _, err := st.FinishRunningExecution(ctx, id, "stopped", stoppedExitCode); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := bufio.NewScanner(openLogStream(t, ts, id, 30*time.Second).Body)
+	if first := readSSE(t, scanner, func(sseMessage) bool { return true }); len(first) != 1 || first[0].event != "log" {
+		t.Fatalf("the stream sent %+v first, want the chunk on record", first)
+	}
+	if err := st.AppendLogChunk(ctx, id, "combined", "after the stop\n"); err != nil {
+		t.Fatal(err)
+	}
+	rest := readSSE(t, scanner, nil)
+	if len(rest) != 2 || rest[0].event != "log" || !strings.Contains(rest[0].data, "after the stop") || rest[1].event != "done" ||
+		!strings.Contains(rest[1].data, `"status":"stopped"`) || strings.Contains(rest[1].data, "owner_gone") {
+		t.Fatalf("the stream sent %+v, want the last chunk then a done with the status stopped", rest)
 	}
 }
 

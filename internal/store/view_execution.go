@@ -156,6 +156,20 @@ func (v *View) ExecutionStatus(ctx context.Context, execID string) (string, bool
 	return status, err == nil, err
 }
 
+// ExecutionOwnerGone says whether the execution execID is recorded as running and the process that
+// ran it, on this host, is dead: the same test as ExecutionDetail.OwnerGone, without reading the rest
+// of the record. It is false for an execution that does not exist.
+func (v *View) ExecutionOwnerGone(ctx context.Context, execID string) (bool, error) {
+	e, err := scanExecution(v.q.QueryRowContext(ctx, `SELECT `+executionColumns+` FROM executions e WHERE e.exec_id = ?`, execID).Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return v.ownerGone(e), nil
+}
+
 // loadGateRuns fills the gate runs of the rounds in byRound.
 func (v *View) loadGateRuns(ctx context.Context, byRound map[int64]*GateRoundDetail) error {
 	ids := make([]any, 0, len(byRound))

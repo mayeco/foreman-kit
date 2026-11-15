@@ -118,7 +118,9 @@ const (
 // Each "log" message is one chunk and carries the id of that chunk, so a connection that drops
 // continues where it was: the browser sends the last id it got as Last-Event-ID. The first
 // connection says where to start with "after". When the execution has ended and its output is sent,
-// a "done" message says how it ended and the stream closes.
+// a "done" message says how it ended and the stream closes. An execution recorded as running whose
+// owner process is gone has ended too: its "done" message says so ("owner_gone"). The stream only
+// ends; the record stays as it is, because a GET writes nothing.
 func (s *Server) apiExecutionLogStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ctx := r.Context()
@@ -134,12 +136,18 @@ func (s *Server) apiExecutionLogStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// read returns the chunks written after position and whether the execution still runs, from one
-	// snapshot: once it says the execution has ended, every chunk of its output is in what it returned.
-	read := func() (chunks []store.LogChunk, status string, found bool, err error) {
+	// read returns the chunks written after position, whether the execution still runs and whether its
+	// owner is gone, from one snapshot: once it says the execution has ended, every chunk of its output
+	// is in what it returned (an owner that is gone writes no more).
+	read := func() (chunks []store.LogChunk, status string, ownerGone, found bool, err error) {
 		err = s.store.View(ctx, func(db *store.View) error {
 			if status, found, err = db.ExecutionStatus(ctx, id); err != nil || !found {
 				return err
+			}
+			if status == "running" {
+				if ownerGone, err = db.ExecutionOwnerGone(ctx, id); err != nil {
+					return err
+				}
 			}
 			after := position
 			for {
@@ -154,10 +162,10 @@ func (s *Server) apiExecutionLogStream(w http.ResponseWriter, r *http.Request) {
 				after = page.Next
 			}
 		})
-		return chunks, status, found, err
+		return chunks, status, ownerGone, found, err
 	}
 
-	chunks, status, found, err := read()
+	chunks, status, ownerGone, found, err := read()
 	switch {
 	case err != nil:
 		fail(w, r, err)
@@ -199,8 +207,18 @@ func (s *Server) apiExecutionLogStream(w http.ResponseWriter, r *http.Request) {
 		if ended && s.exec.owns(id) && time.Since(endedAt) < logStreamDrain {
 			ended = false
 		}
+		// An execution that is recorded as running whose owner is gone has ended without recording how,
+		// and nothing will write its output again. One this process runs never counts as gone.
+		orphaned := !ended && ownerGone && !s.exec.owns(id)
+		if orphaned {
+			ended = true
+		}
 		if ended {
-			data, _ := json.Marshal(map[string]string{"exec_id": id, "status": status}) // a map of strings always marshals
+			done := map[string]any{"exec_id": id, "status": status}
+			if orphaned {
+				done["owner_gone"] = true
+			}
+			data, _ := json.Marshal(done) // strings and a boolean always marshal
 			if _, err := fmt.Fprintf(w, "event: done\ndata: %s\n\n", data); err != nil {
 				return
 			}
@@ -223,7 +241,7 @@ func (s *Server) apiExecutionLogStream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-time.After(logStreamPoll):
 		}
-		if chunks, status, found, err = read(); err != nil || !found {
+		if chunks, status, ownerGone, found, err = read(); err != nil || !found {
 			return
 		}
 	}

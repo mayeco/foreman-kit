@@ -90,6 +90,12 @@ func TestViewReadsOneExecution(t *testing.T) {
 		if rec, err := v.Execution(ctx, "no-such-execution"); rec != nil || err != nil {
 			t.Errorf("an execution that does not exist = %+v, %v", rec, err)
 		}
+		// The read of a stream that follows an execution gives the same answer as the record.
+		for id, want := range map[string]bool{"orphan": true, "search-apply": false, "api-apply": false, "no-such-execution": false} {
+			if got, err := v.ExecutionOwnerGone(ctx, id); got != want || err != nil {
+				t.Errorf("ExecutionOwnerGone(%s) = %v, %v, want %v", id, got, err, want)
+			}
+		}
 
 		if status, found, err := v.ExecutionStatus(ctx, "api-apply"); status != "succeeded" || !found || err != nil {
 			t.Errorf("ExecutionStatus(api-apply) = %q, %v, %v", status, found, err)

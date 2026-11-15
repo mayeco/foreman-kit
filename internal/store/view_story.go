@@ -74,8 +74,13 @@ func (v *View) executionDetail(e Execution) *ExecutionDetail {
 	return &ExecutionDetail{
 		Execution: e,
 		Attempts:  []AttemptDetail{},
-		OwnerGone: e.Status == "running" && e.PID > 0 && (e.Host == "" || e.Host == v.s.host) && !IsPIDAlive(e.PID),
+		OwnerGone: v.ownerGone(e),
 	}
+}
+
+// ownerGone says e is recorded as running and the process that ran it, on this host, is dead.
+func (v *View) ownerGone(e Execution) bool {
+	return e.Status == "running" && e.PID > 0 && (e.Host == "" || e.Host == v.s.host) && !IsPIDAlive(e.PID)
 }
 
 // AttemptDetail is one try of one engine with the stretches in which it showed no activity.

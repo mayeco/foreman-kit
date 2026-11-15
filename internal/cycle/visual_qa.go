@@ -763,8 +763,8 @@ func VisualQABegin(ctx context.Context, root string, st *store.Store, opts Visua
 			baseBranch := ResolveBaseBranch(root)
 			_ = SyncRepos(ctx, root, st, false, io.Discard)
 			baseRef := "HEAD"
-			if _, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", "origin/"+baseBranch); err == nil {
-				baseRef = "origin/" + baseBranch
+			if remoteBase := settings.RemoteName(root) + "/" + baseBranch; refExists(ctx, root, remoteBase) {
+				baseRef = remoteBase
 			}
 			visualWT := filepath.Join(settings.WorktreesBase(root), "_visual_qa")
 			if err := PrepareSessionWorktree(ctx, root, visualWT, baseRef, baseBranch, io.Discard); err != nil {

@@ -151,6 +151,12 @@ func resolveLocalBaseRef(ctx context.Context, root string) string {
 	return "HEAD"
 }
 
+// refExists reports whether ref names an object of the repository at dir.
+func refExists(ctx context.Context, dir, ref string) bool {
+	_, err := gitx.RunGit(ctx, dir, "rev-parse", "--verify", "--quiet", ref)
+	return err == nil
+}
+
 // NormalizeRepoArg turns "core" into "repos/core" and leaves "repos/core" as it is.
 func NormalizeRepoArg(repo string) string {
 	repo = strings.Trim(strings.TrimSpace(repo), "/")

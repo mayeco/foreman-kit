@@ -423,12 +423,13 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 		br, onBranch := gitx.CurrentBranch(ctx, root)
 		sha, _ := gitx.RunGit(ctx, root, "rev-parse", "--short", "HEAD")
 		behindNote := ""
-		// The main checkout is not moved by a merge: say when it lags origin, or its repos/ and
+		remote := settings.RemoteName(root)
+		// The main checkout is not moved by a merge: say when it lags the remote, or its repos/ and
 		// backlog look older than what was integrated.
 		if onBranch {
-			if n, err := gitx.RunGit(ctx, root, "rev-list", "--count", "HEAD..origin/"+br); err == nil {
+			if n, err := gitx.RunGit(ctx, root, "rev-list", "--count", "HEAD.."+remote+"/"+br); err == nil {
 				if behind, _ := strconv.Atoi(strings.TrimSpace(n)); behind > 0 {
-					behindNote = fmt.Sprintf(" behind origin/%s by %d (foreman-kit sync)", br, behind)
+					behindNote = fmt.Sprintf(" behind %s/%s by %d (foreman-kit sync)", remote, br, behind)
 				}
 			}
 		}
@@ -450,7 +451,7 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 				}
 				fmt.Fprintf(out, "  %-22s %-24s %s dirty=%d\n", p, cbr, strings.TrimSpace(csha), dirtyLines)
 			}
-			baseRef := "origin/" + ResolveBaseBranch(root)
+			baseRef := settings.RemoteName(root) + "/" + ResolveBaseBranch(root)
 			if _, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", baseRef); err != nil {
 				baseRef = "HEAD"
 			}
@@ -638,8 +639,8 @@ func Progress(ctx context.Context, root string, st *store.Store, since time.Time
 	if repo, err := gitx.Open(root); err == nil {
 		baseBranch := ResolveBaseBranch(root)
 		baseRef := "HEAD"
-		if _, err := repo.RevParse("origin/" + baseBranch); err == nil {
-			baseRef = "origin/" + baseBranch
+		if remoteBase := settings.RemoteName(root) + "/" + baseBranch; refExists(ctx, root, remoteBase) {
+			baseRef = remoteBase
 		}
 		if allInt, err := repo.CompletedSince("", baseRef); err == nil {
 			for _, ic := range allInt {
@@ -1275,7 +1276,7 @@ const rotatedHistoryPattern = ".foreman-kit/agent_history.*.json"
 // would count as local edits, and a checkout with local edits is never moved again: not by this
 // function, which skips the pull, and not by the dispatcher. A caller already told to stop begins
 // nothing.
-func syncRoot(ctx context.Context, root string, out io.Writer, flag func(string)) error {
+func syncRoot(ctx context.Context, root, remote string, out io.Writer, flag func(string)) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1321,7 +1322,7 @@ func syncRoot(ctx context.Context, root string, out io.Writer, flag func(string)
 			if rootBehind > 0 {
 				fmt.Fprintf(out, "  root: pulled %d commit(s) [%s]\n", rootBehind, branch)
 			} else {
-				fmt.Fprintf(out, "  root: up to date with origin [%s]\n", branch)
+				fmt.Fprintf(out, "  root: up to date with %s [%s]\n", remote, branch)
 			}
 		} else if _, err2 := gitx.RunGit(apply, root, "rev-parse", "-q", "--verify", "@{u}"); err2 != nil {
 			// No upstream configured (e.g. local test repo without upstream tracking)
@@ -1359,8 +1360,9 @@ func SyncRepos(ctx context.Context, root string, st *store.Store, publish bool, 
 	if err != nil {
 		return err
 	}
-	_ = repo.Fetch(ctx, "origin")
-	if err := syncRoot(ctx, root, out, flag); err != nil {
+	remote := settings.RemoteName(root)
+	_ = repo.Fetch(ctx, remote)
+	if err := syncRoot(ctx, root, remote, out, flag); err != nil {
 		return err
 	}
 
@@ -1396,7 +1398,7 @@ func SyncRepos(ctx context.Context, root string, st *store.Store, publish bool, 
 			}
 			continue
 		}
-		_, _ = gitx.RunGit(ctx, childDir, "fetch", "--quiet", "origin")
+		_, _ = gitx.RunGit(ctx, childDir, "fetch", "--quiet", remote)
 		if _, err := gitx.RunGit(ctx, childDir, "rev-parse", "-q", "--verify", "@{u}"); err != nil {
 			fmt.Fprintf(out, "  %s: ATTENTION (fetch failed or no upstream for %s)\n", p, cBranch)
 			flag(p + " no upstream")
@@ -1420,7 +1422,7 @@ func SyncRepos(ctx context.Context, root string, st *store.Store, publish bool, 
 		}
 		if ahead > 0 {
 			if publish {
-				if _, err := gitx.RunGit(ctx, childDir, "push", "--quiet", "origin", "HEAD:"+cBranch); err == nil {
+				if _, err := gitx.RunGit(ctx, childDir, "push", "--quiet", remote, "HEAD:"+cBranch); err == nil {
 					fmt.Fprintf(out, "  %s: pushed %d commit(s)\n", p, ahead)
 					published = append(published, p)
 					continue
@@ -1438,7 +1440,7 @@ func SyncRepos(ctx context.Context, root string, st *store.Store, publish bool, 
 		// and the pointers of the commits just pushed were then never recorded.
 		err1 := gitx.StageGitlinks(ctx, root, published...)
 		_, err2 := gitx.RunGit(ctx, root, "commit", "--quiet", "-m", "chore(repos): update pointers for "+strings.Join(published, " "))
-		err3 := repo.Push(ctx, "origin", "HEAD")
+		err3 := repo.Push(ctx, remote, "HEAD")
 		if err1 == nil && err2 == nil && err3 == nil {
 			fmt.Fprintf(out, "  root: recorded pointers for %s\n", strings.Join(published, " "))
 		} else {

@@ -783,7 +783,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 			if vis != "" {
 				fmt.Fprintf(lw, "visual QA session %s in progress: leaving main checkout untouched; judging in .worktrees/_cycle\n", vis)
 				if repo, err := gitx.Open(root); err == nil {
-					_ = repo.Fetch(ctx, "origin", baseBranch)
+					_ = repo.Fetch(ctx, settings.RemoteName(root), baseBranch)
 				}
 			} else {
 				if err := ScopeGuard(ctx, root, "cycle "+stamp, st, lw); err != nil {
@@ -792,8 +792,8 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 				_ = SyncRepos(ctx, root, st, false, lw)
 			}
 			baseRef := "HEAD"
-			if _, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", "origin/"+baseBranch); err == nil {
-				baseRef = "origin/" + baseBranch
+			if remoteBase := settings.RemoteName(root) + "/" + baseBranch; refExists(ctx, root, remoteBase) {
+				baseRef = remoteBase
 			}
 			if err := PrepareSessionWorktree(ctx, root, cycleWT, baseRef, baseBranch, lw); err != nil {
 				return err

@@ -1413,30 +1413,54 @@ func (d *Dispatcher) startWorker(ctx context.Context, item BacklogItem) {
 	}()
 }
 
-// backlogUnreadable reports, once per distinct error, a backlog file that cannot be read or parsed:
+// backlogUnreadable reports, once per distinct cause, a backlog file that cannot be read or parsed:
 // as an event, and in the log, since nothing new starts from it (the last valid backlog, if this
-// process read one, keeps being used) and it otherwise only showed in SQLite.
-func (d *Dispatcher) backlogUnreadable(ctx context.Context, cause error) {
-	msg := ""
-	if cause != nil {
-		msg = cause.Error()
-	}
-	key := "backlog.unreadable.logged:" + msg
+// process read one, keeps being used) and it otherwise only showed in SQLite. cause is never empty.
+// The reports are forgotten by backlogReadable once a valid backlog is read, so a backlog that breaks
+// again in a long-lived process is reported again.
+func (d *Dispatcher) backlogUnreadable(ctx context.Context, cause string) {
+	key := backlogUnreadableLogKey + cause
 	d.stateMu.Lock()
 	first := !d.reported[key]
 	d.reported[key] = true
 	d.stateMu.Unlock()
 	if first {
-		d.logf("dispatcher: BACKLOG UNREADABLE: %s: %s; nothing new starts from it until it is valid JSON", d.opts.BacklogFile, msg)
+		d.logf("dispatcher: BACKLOG UNREADABLE: %s: %s; nothing new starts from it until it is fixed", d.opts.BacklogFile, cause)
 	}
-	d.reportOnce(ctx, "backlog.unreadable", map[string]any{"file": d.opts.BacklogFile, "error": msg})
+	d.reportOnce(ctx, backlogUnreadableEvent, map[string]any{"file": d.opts.BacklogFile, "error": cause})
+}
+
+const (
+	backlogUnreadableEvent  = "backlog.unreadable"
+	backlogUnreadableLogKey = "backlog.unreadable.logged:"
+	backlogNotAListCause    = "is not a JSON list of changes"
+)
+
+// backlogReadable forgets the reports of an unreadable backlog: the file is valid again.
+func (d *Dispatcher) backlogReadable() {
+	d.stateMu.Lock()
+	defer d.stateMu.Unlock()
+	for key := range d.reported {
+		if strings.HasPrefix(key, backlogUnreadableLogKey) || strings.HasPrefix(key, backlogUnreadableEvent+":") {
+			delete(d.reported, key)
+		}
+	}
+}
+
+// backlogParseCause says why raw does not parse as JSON, with the byte offset when the decoder has one.
+func backlogParseCause(err error) string {
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		return fmt.Sprintf("%s (at byte %d)", syn.Error(), syn.Offset)
+	}
+	return err.Error()
 }
 
 func (d *Dispatcher) loadBacklog(ctx context.Context, recordSeen bool) ([]BacklogItem, []map[string]any, map[string]*float64) {
 	rawBytes, err := os.ReadFile(d.opts.BacklogFile)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			d.backlogUnreadable(ctx, err)
+			d.backlogUnreadable(ctx, err.Error())
 			d.stateMu.Lock()
 			cached := append([]BacklogItem(nil), d.lastValidBacklog...)
 			cachedInv := append([]map[string]any(nil), d.lastInvalidItems...)
@@ -1456,7 +1480,10 @@ func (d *Dispatcher) loadBacklog(ctx context.Context, recordSeen bool) ([]Backlo
 	var generic any
 	var rawItems []any
 	isBacklog := false
-	if err := json.Unmarshal(rawBytes, &generic); err == nil {
+	cause := backlogNotAListCause
+	if err := json.Unmarshal(rawBytes, &generic); err != nil {
+		cause = backlogParseCause(err)
+	} else {
 		switch v := generic.(type) {
 		case map[string]any:
 			rawItems, isBacklog = v["changes"].([]any)
@@ -1465,7 +1492,7 @@ func (d *Dispatcher) loadBacklog(ctx context.Context, recordSeen bool) ([]Backlo
 		}
 	}
 	if !isBacklog {
-		d.backlogUnreadable(ctx, err)
+		d.backlogUnreadable(ctx, cause)
 		if len(strings.TrimSpace(string(rawBytes))) > 0 {
 			d.stateMu.Lock()
 			cached := append([]BacklogItem(nil), d.lastValidBacklog...)
@@ -1479,6 +1506,7 @@ func (d *Dispatcher) loadBacklog(ctx context.Context, recordSeen bool) ([]Backlo
 		return nil, nil, map[string]*float64{}
 	}
 
+	d.backlogReadable()
 	var valid []BacklogItem
 	var invalid []map[string]any
 	counts := make(map[string]int)

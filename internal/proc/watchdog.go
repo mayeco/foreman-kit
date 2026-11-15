@@ -495,13 +495,15 @@ func ActivityState(ctx context.Context, dir, tmpDir string, outputBytes int64) s
 	h.Write([]byte{0})
 
 	hashUntracked := func(repoDir string) {
-		out, err := gitx.RunGit(ctx, repoDir, "ls-files", "--others", "--exclude-standard")
+		// NUL-terminated records: without -z git C-quotes a name with non-ASCII bytes, a double quote,
+		// a tab or a backslash, and the file under the quoted spelling cannot be read. A name is not
+		// trimmed either: it may begin or end with a space.
+		out, err := gitx.RunGit(ctx, repoDir, "ls-files", "-z", "--others", "--exclude-standard")
 		if err != nil {
 			return
 		}
 		var files []string
-		for _, line := range strings.Split(out, "\n") {
-			f := strings.TrimSpace(line)
+		for _, f := range strings.Split(out, "\x00") {
 			if f != "" {
 				files = append(files, f)
 			}

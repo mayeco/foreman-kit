@@ -863,10 +863,11 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 
 	// 30. portal
 	portalCmd := &cobra.Command{
-		Use:                "portal [--port 4567] [--bind 127.0.0.1]",
+		Use:                strings.TrimPrefix(portal.PortalUsage, "foreman-kit "),
 		Short:              "Start the local operator web portal with SSE streaming",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The help comes before the workspace: it is read outside an application too.
 			if hasHelpFlag(args) {
 				return cmd.Help()
 			}
@@ -879,6 +880,10 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			return wrapCode(portal.RunPortalCLI(ctx, root, st, portalKit(st), args, stdout, stderr))
 		},
 	}
+	// Flag parsing is off, so cobra knows none of the command's flags: its help is the portal's own.
+	portalCmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+		portal.WritePortalHelp(cmd.OutOrStdout())
+	})
 
 	// 31. db (db path)
 	dbCmd := &cobra.Command{

@@ -460,16 +460,28 @@ func (s *Server) httpServer() *http.Server {
 
 // ListenAndServe starts the HTTP server on addr until ctx is canceled.
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
+	ln, err := s.Listen(addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ctx, ln)
+}
+
+// Listen binds the portal to addr (host:port, as net.JoinHostPort writes it) and records the host it
+// listens on. It serves nothing: Serve does, once the caller has said where the portal listens.
+func (s *Server) Listen(addr string) (net.Listener, error) {
 	if addr == "" {
-		addr = fmt.Sprintf("%s:%d", DefaultBind, DefaultPort)
+		addr = net.JoinHostPort(DefaultBind, strconv.Itoa(DefaultPort))
 	}
 	if h, _, err := net.SplitHostPort(addr); err == nil && h != "" {
 		s.setBind(h)
 	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
+	return net.Listen("tcp", addr)
+}
+
+// Serve serves the portal on ln until ctx is canceled, then shuts the HTTP server down and waits for
+// the runs the portal launched. It takes ln over: ln is closed when Serve returns.
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	// The pages read the mirror of the backlog and never bring it up to date: the portal does that
 	// here, as it starts, after each of its own edits, and when it sees the files change.
 	s.mirrorBacklog(ctx)
@@ -585,10 +597,97 @@ func say(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...) // nowhere is left to report that the output is gone
 }
 
-// RunPortalCLI implements `foreman-kit portal [--port 4567] [--bind 127.0.0.1]`. kit runs what the
-// portal starts (NewKit in a real installation); opts configure the Server. Without --port or
-// --bind it listens where the settings of the application say: nothing is read from the
-// environment, where a variable called PORT is what a gate gives the service it starts.
+// PortalUsage is the usage line of `foreman-kit portal`: what its help opens with and what a
+// command line it refuses is answered with.
+const PortalUsage = "foreman-kit portal [--port N] [--bind ADDR]"
+
+// WritePortalHelp writes the help of `foreman-kit portal` to w: its usage line, its flags, the
+// values a port takes and the settings each flag stands in for. `foreman-kit portal --help` and
+// RunPortalCLI both write it, so the two never differ.
+func WritePortalHelp(w io.Writer) {
+	say(w, "Start the local operator web portal with SSE streaming.\n\n")
+	say(w, "Usage:\n  %s\n\n", PortalUsage)
+	say(w, "Flags:\n")
+	say(w, "  -p, --port N      the port to listen on, a whole number from 1 to 65535\n")
+	say(w, "                    (default: %s)\n", settings.DaemonPort.Where())
+	say(w, "  -o, --bind ADDR   the address to listen on, such as 127.0.0.1 or ::1\n")
+	say(w, "                    (default: %s)\n", settings.DaemonBind.Where())
+	say(w, "  -h, --help        show this help\n\n")
+	say(w, "Each flag takes its value as the next argument or after an equals sign (--port=4567).\n")
+}
+
+// portalArgs is what the command line of `foreman-kit portal` says: a port and an address when it
+// names them, or that it asks for the help.
+type portalArgs struct {
+	port    int
+	portSet bool
+	bind    string
+	bindSet bool
+	help    bool
+}
+
+// parsePortalArgs reads the command line of `foreman-kit portal`. It accepts --port/-p and
+// --bind/-o, each as `flag value` or `flag=value`, and -h/--help. The value after --port is the
+// port even when it starts with a dash, so `--port -1` is refused for its range rather than read
+// as a flag. What it refuses comes back as the whole message for stderr, ending in a newline;
+// the command then exits 2.
+func parsePortalArgs(args []string) (portalArgs, string) {
+	var a portalArgs
+	usage := "Usage: " + PortalUsage + "\n"
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-h" || arg == "--help" {
+			a.help = true
+			continue
+		}
+		name, value, inline := strings.Cut(arg, "=")
+		switch name {
+		case "-p", "--port", "-o", "--bind":
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return a, fmt.Sprintf("portal: unknown flag %s\n%s", arg, usage)
+			}
+			return a, fmt.Sprintf("portal: unexpected argument %s\n%s", shownValue(arg), usage)
+		}
+		if !inline {
+			if i+1 >= len(args) {
+				return a, fmt.Sprintf("portal: %s needs a value\n%s", name, usage)
+			}
+			i++
+			value = args[i]
+		}
+		switch name {
+		case "-p", "--port":
+			p, err := strconv.Atoi(value)
+			if err != nil || p < 1 || p > 65535 {
+				return a, fmt.Sprintf("portal: --port %s is not a port: give a whole number from 1 to 65535\n", shownValue(value))
+			}
+			a.port, a.portSet = p, true
+		default:
+			if strings.TrimSpace(value) == "" {
+				return a, "portal: --bind is empty: give an address such as 127.0.0.1\n"
+			}
+			a.bind, a.bindSet = value, true
+		}
+	}
+	return a, ""
+}
+
+// shownValue writes a value of the command line as a message shows it: quoted when it is empty or
+// holds a space, so that the person sees what was given.
+func shownValue(v string) string {
+	if v == "" || strings.ContainsAny(v, " \t\r\n") {
+		return strconv.Quote(v)
+	}
+	return v
+}
+
+// RunPortalCLI implements `foreman-kit portal [--port N] [--bind ADDR]`. kit runs what the portal
+// starts (NewKit in a real installation); opts configure the Server. Without --port or --bind it
+// listens where the settings of the application say: nothing is read from the environment, where a
+// variable called PORT is what a gate gives the service it starts. A command line it refuses exits 2
+// before anything starts; it says it listens only once it holds the listener, and a bind that fails
+// exits 1.
 func RunPortalCLI(ctx context.Context, root string, st *store.Store, kit Kit, args []string, stdout, stderr io.Writer, opts ...Option) int {
 	if stdout == nil {
 		stdout = os.Stdout
@@ -596,32 +695,36 @@ func RunPortalCLI(ctx context.Context, root string, st *store.Store, kit Kit, ar
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	given, refusal := parsePortalArgs(args)
+	if refusal != "" {
+		say(stderr, "%s", refusal)
+		return 2
+	}
+	if given.help {
+		WritePortalHelp(stdout)
+		return 0
+	}
 	port, bind := listenWhere(root, stderr)
-
-	for i := 0; i < len(args); i++ {
-		switch {
-		case (args[i] == "-p" || args[i] == "--port") && i+1 < len(args):
-			if p, err := strconv.Atoi(args[i+1]); err == nil && p > 0 {
-				port = p
-			}
-			i++
-		case (args[i] == "-o" || args[i] == "--bind") && i+1 < len(args):
-			bind = args[i+1]
-			i++
-		default:
-			say(stderr, "Usage: foreman-kit portal [--port 4567] [--bind 127.0.0.1]\n")
-			return 2
-		}
+	if given.portSet {
+		port = given.port
+	}
+	if given.bindSet {
+		bind = given.bind
 	}
 
-	addr := fmt.Sprintf("%s:%d", bind, port)
+	addr := net.JoinHostPort(bind, strconv.Itoa(port))
 	srv, err := New(root, st, kit, opts...)
 	if err != nil {
 		say(stderr, "portal: %v\n", err)
 		return 1
 	}
+	ln, err := srv.Listen(addr)
+	if err != nil {
+		say(stderr, "portal: %v\n", err)
+		return 1
+	}
 	say(stdout, "portal: listening on http://%s\n", addr)
-	if err := srv.ListenAndServe(ctx, addr); err != nil {
+	if err := srv.Serve(ctx, ln); err != nil {
 		say(stderr, "portal: %v\n", err)
 		return 1
 	}

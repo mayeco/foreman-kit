@@ -1,8 +1,10 @@
 package gitx
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -266,6 +268,55 @@ func NeedsSystemSSH(hostCfg *SSHHostConfig) bool {
 	return hostCfg.ProxyJump != "" || hostCfg.ProxyCommand != ""
 }
 
+// liveAuthSock reports whether sock names an existing file, the test DiscoverSSHAuthSock applies too.
+func liveAuthSock(sock string) bool {
+	sock = strings.TrimSpace(sock)
+	if sock == "" {
+		return false
+	}
+	_, err := os.Stat(sock)
+	return err == nil
+}
+
+// agentSigner is a key of an ssh-agent that reaches the agent when it signs. Listing the keys and signing
+// happen at different times: go-git calls the callback of BuildSSHAuth first and signs during the
+// handshake, so a signer that kept the listing's connection would find it closed. Each signature opens its
+// own connection and closes it, which leaves nothing to close when the operation ends.
+type agentSigner struct {
+	sock string
+	pub  gossh.PublicKey
+}
+
+func (s *agentSigner) PublicKey() gossh.PublicKey { return s.pub }
+
+func (s *agentSigner) Sign(rand io.Reader, data []byte) (*gossh.Signature, error) {
+	return s.SignWithAlgorithm(rand, data, "")
+}
+
+// SignWithAlgorithm implements gossh.AlgorithmSigner so an RSA key keeps negotiating rsa-sha2-*.
+func (s *agentSigner) SignWithAlgorithm(rand io.Reader, data []byte, algorithm string) (*gossh.Signature, error) {
+	conn, err := net.Dial("unix", s.sock)
+	if err != nil {
+		return nil, fmt.Errorf("gitx: ssh-agent at %s: %w", s.sock, err)
+	}
+	defer conn.Close()
+	signers, err := agent.NewClient(conn).Signers()
+	if err != nil {
+		return nil, fmt.Errorf("gitx: ssh-agent at %s: %w", s.sock, err)
+	}
+	want := s.pub.Marshal()
+	for _, sg := range signers {
+		if !bytes.Equal(sg.PublicKey().Marshal(), want) {
+			continue
+		}
+		if as, ok := sg.(gossh.AlgorithmSigner); ok && algorithm != "" {
+			return as.SignWithAlgorithm(rand, data, algorithm)
+		}
+		return sg.Sign(rand, data)
+	}
+	return nil, fmt.Errorf("gitx: ssh-agent at %s no longer holds the key %s", s.sock, gossh.FingerprintSHA256(s.pub))
+}
+
 func collectSigners(hostCfg SSHHostConfig) ([]gossh.Signer, error) {
 	var signers []gossh.Signer
 
@@ -273,9 +324,10 @@ func collectSigners(hostCfg SSHHostConfig) ([]gossh.Signer, error) {
 	if !hostCfg.IdentitiesOnly {
 		if sock := DiscoverSSHAuthSock(hostCfg.IdentityAgent); sock != "" {
 			if conn, err := net.Dial("unix", sock); err == nil {
-				ag := agent.NewClient(conn)
-				if agentSigners, err := ag.Signers(); err == nil {
-					signers = append(signers, agentSigners...)
+				if agentSigners, err := agent.NewClient(conn).Signers(); err == nil {
+					for _, sg := range agentSigners {
+						signers = append(signers, &agentSigner{sock: sock, pub: sg.PublicKey()})
+					}
 				}
 				_ = conn.Close()
 			}

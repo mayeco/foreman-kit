@@ -767,9 +767,17 @@ func RunGit(ctx context.Context, dir string, args ...string) (string, error) {
 			env = append(env, kv)
 		}
 	}
-	if os.Getenv("FOREMANKIT_SANITIZE_GIT_ENV") != "1" && os.Getenv("SSH_AUTH_SOCK") == "" {
+	if os.Getenv("FOREMANKIT_SANITIZE_GIT_ENV") != "1" && !liveAuthSock(os.Getenv("SSH_AUTH_SOCK")) {
+		// The inherited value is empty or names a socket that is gone (a daemon started in tmux keeps the
+		// agent path of an SSH login that ended): hand git a live agent when one can be found.
 		if sock := DiscoverSSHAuthSock(""); sock != "" {
-			env = append(env, "SSH_AUTH_SOCK="+sock)
+			kept := env[:0]
+			for _, kv := range env {
+				if name, _, _ := strings.Cut(kv, "="); name != "SSH_AUTH_SOCK" {
+					kept = append(kept, kv)
+				}
+			}
+			env = append(kept, "SSH_AUTH_SOCK="+sock)
 		}
 	}
 	// Callers match git's messages (RebaseBranch, conflict file extraction): LANGUAGE=C keeps them

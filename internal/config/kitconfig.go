@@ -968,8 +968,15 @@ func leafKeysOfMap(data any, prefix string) []string {
 // one the catalog defines and data does not write, one that holds something it does not accept, and
 // one the catalog does not know (a key an older foreman-kit read, or a typo).
 func checkSectionSettings(root, section string, data map[string]any, rep *FileProblems) {
+	checkSectionSettingsWith(quietReader(root), root, section, data, rep)
+}
+
+// checkSectionSettingsWith is checkSectionSettings asking r for the keys of the other files that
+// the values of section are checked against (the workers a slot must not take): the files alone for
+// check, the files with a change not yet written for `config set`, what the run reads for a run.
+func checkSectionSettingsWith(r *settings.Reader, root, section string, data map[string]any, rep *FileProblems) {
 	reported := map[settings.Key]bool{}
-	for _, p := range quietReader(root).Use(section, data).Problems(section) {
+	for _, p := range r.Use(section, data).Problems(section) {
 		rep.Errors = append(rep.Errors, p.Text)
 		reported[p.Key] = true
 	}
@@ -978,7 +985,7 @@ func checkSectionSettings(root, section string, data map[string]any, rep *FilePr
 		if val == nil || reported[s.Key] {
 			continue
 		}
-		if prob := checkSettingTypeProblem(root, s, val); prob != "" {
+		if prob := checkSettingTypeProblemWith(r, root, s, val); prob != "" {
 			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %s (is %v)", s.Key.Path(), prob, formatInspect(val)))
 		}
 	}
@@ -2047,6 +2054,76 @@ func CheckRunOverrides(root string) error {
 			return fmt.Errorf("--set %s=%s: %s", key, given[key], strings.TrimPrefix(err.Error(), name+" "))
 		}
 	}
+	// What the values give the run may break a file they do not name: workers a slot now falls among.
+	return checkRunOverridesAgainstFiles(root, files, given, keys)
+}
+
+// otherFilesBrought lists, for each configuration file other than the one called changed, the errors
+// that holding `after` as the changed file brings: those its settings have with it and did not have
+// with the file as it is. A file that is missing or cannot be read says so in check, whatever is
+// written. Each item reads "<file> invalid: <errors>".
+func otherFilesBrought(root, changed string, after map[string]any) []string {
+	var out []string
+	for _, f := range settings.Files() {
+		if f.Name == changed {
+			continue
+		}
+		data, present, err := loadConfigYAML(root, f.Name)
+		if err != nil || !present {
+			continue
+		}
+		errorsWith := func(r *settings.Reader) []string {
+			rep := FileProblems{Errors: []string{}, Warnings: []string{}}
+			checkSectionSettingsWith(r, root, f.Name, data, &rep)
+			return rep.Errors
+		}
+		had := map[string]bool{}
+		for _, problem := range errorsWith(quietReader(root)) {
+			had[problem] = true
+		}
+		var brought []string
+		for _, problem := range errorsWith(quietReader(root).Use(changed, after)) {
+			if !had[problem] {
+				brought = append(brought, problem)
+			}
+		}
+		if len(brought) > 0 {
+			out = append(out, fmt.Sprintf("%s invalid: %s", f.Path, strings.Join(brought, "; ")))
+		}
+	}
+	return out
+}
+
+// checkRunOverridesAgainstFiles says which file the values `--set` gave the run make unusable: a
+// value of a file the run did not override that holds with the files alone and does not with what
+// the run reads (a slot that a raised number of workers takes). nil: none.
+func checkRunOverridesAgainstFiles(root, files string, given map[settings.Key]string, keys []string) error {
+	inEffect := &settings.Reader{Root: root, Stderr: io.Discard}
+	alone := quietReader(root)
+	var given2 []string
+	for _, name := range keys {
+		given2 = append(given2, name+"="+given[settings.Key(name)])
+	}
+	for _, f := range settings.Files() {
+		data, present, err := alone.Data(f.Name)
+		if err != nil || !present {
+			continue
+		}
+		for _, s := range settings.In(f.Name) {
+			if _, overridden := given[s.Key]; overridden {
+				continue
+			}
+			val := digMap(data, s.Key.Parts()...)
+			if val == nil {
+				continue
+			}
+			prob := checkSettingTypeProblemWith(inEffect, files, s, val)
+			if prob == "" || checkSettingTypeProblemWith(alone, files, s, val) != "" {
+				continue
+			}
+			return fmt.Errorf("--set %s makes %s invalid: %s: %s (is %v)", strings.Join(given2, ", "), f.Path, s.Key.Path(), prob, formatInspect(val))
+		}
+	}
 	return nil
 }
 
@@ -2287,8 +2364,15 @@ func Set(root, key, text string, dryRun bool, out io.Writer) error {
 			brought = append(brought, problem)
 		}
 	}
+	var invalid []string
 	if len(brought) > 0 {
-		return refusedValue("%s = %s would make %s invalid: %s", key, formatConfigValue(value), relFile, strings.Join(brought, "; "))
+		invalid = append(invalid, fmt.Sprintf("%s invalid: %s", relFile, strings.Join(brought, "; ")))
+	}
+	// A value another file is checked against (the workers a slot must not take) may bring a problem
+	// there: a change is refused for that file too, as check would reject it.
+	invalid = append(invalid, otherFilesBrought(root, section, after)...)
+	if len(invalid) > 0 {
+		return refusedValue("%s = %s would make %s", key, formatConfigValue(value), strings.Join(invalid, "; "))
 	}
 
 	oldDisplay := "nothing (the key was missing)"

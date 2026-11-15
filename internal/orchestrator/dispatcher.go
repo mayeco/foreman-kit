@@ -2681,10 +2681,13 @@ func (d *Dispatcher) keepLeftovers(ctx context.Context, wt, change, branch strin
 			if !ok || curBranch != branch {
 				continue
 			}
-			if err := d.commitChild(ctx, childDir, cp, message); err != nil {
+			committed, err := d.commitChild(ctx, childDir, cp, message)
+			if err != nil {
 				return err
 			}
-			kept = append(kept, cp)
+			if committed {
+				kept = append(kept, cp)
+			}
 		}
 	}
 	if len(kept) > 0 {
@@ -3784,19 +3787,9 @@ func (d *Dispatcher) commitChildren(ctx context.Context, wt, change string) erro
 		if strings.TrimSpace(stOut) == "" {
 			continue
 		}
-		if err := d.commitChild(ctx, childDir, cp, fmt.Sprintf("feat(%s): implement OpenSpec change %s", change, change)); err != nil {
+		if _, err := d.commitChild(ctx, childDir, cp, fmt.Sprintf("feat(%s): implement OpenSpec change %s", change, change)); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (d *Dispatcher) commitChild(ctx context.Context, childDir, cp, message string) error {
-	if _, err := gitx.RunGit(ctx, childDir, "add", "-A"); err != nil {
-		return err
-	}
-	if out, err := gitx.RunGit(ctx, childDir, "commit", "--quiet", "-m", message); err != nil {
-		return NewBlockedError("gate_failure", fmt.Sprintf("commit hook rejected %s:\n%s", cp, out))
 	}
 	return nil
 }

@@ -45,6 +45,9 @@ type mcfOptions struct {
 	// coreRegressionFailsWhen is the shell condition that makes core's regression fail (default: a
 	// file named BROKEN anywhere in core).
 	coreRegressionFailsWhen string
+	// coreNestedSubmodule gives core a nested submodule of its own at vendor/inner (not initialized
+	// in a worktree until something runs "git submodule update --init" there).
+	coreNestedSubmodule bool
 }
 
 // newMCFSandbox returns a sandbox whose .foreman-kit/pipeline.yaml writes merge.outside_commits as given
@@ -137,6 +140,14 @@ func newMCFSandboxWith(t *testing.T, opts mcfOptions) *mcfSandbox {
 		mustWriteFile(t, filepath.Join(seed, "README.md"), "# "+name+"\n")
 		mustWriteFile(t, filepath.Join(seed, "config", "locales", "es.yml"), "es:\n  saludo: \"Cancion\"\n")
 		mcfGit(t, seed, "init", "-b", "main")
+		if name == "core" && opts.coreNestedSubmodule {
+			inner := filepath.Join(tmp, "seed-inner")
+			mustWriteFile(t, filepath.Join(inner, "inner.txt"), "inner\n")
+			mcfGit(t, inner, "init", "-b", "main")
+			mcfGit(t, inner, "add", "-A")
+			mcfGit(t, inner, "commit", "-m", "chore: initial inner")
+			mcfGit(t, seed, "submodule", "add", inner, "vendor/inner")
+		}
 		mcfGit(t, seed, "add", "-A")
 		mcfGit(t, seed, "commit", "-m", "chore: initial "+name)
 		mcfGit(t, seed, "remote", "add", "origin", bare)

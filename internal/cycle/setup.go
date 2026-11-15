@@ -1986,7 +1986,8 @@ func SetupStatus(ctx context.Context, root string, st *store.Store) (map[string]
 		if _, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
 			commitItems = append(commitItems, makeSetupItem("todo", "nothing committed yet", `git add -A && git commit -m "chore: set up the OpenSpec kit"`))
 		} else {
-			dirty, _ := gitx.RunGit(ctx, root, "status", "--porcelain", "--ignore-submodules=dirty")
+			// A read the portal answers a GET with: --no-optional-locks keeps git from rewriting .git/index.
+			dirty, _ := gitx.RunGit(ctx, root, "--no-optional-locks", "status", "--porcelain", "--ignore-submodules=dirty")
 			if strings.TrimSpace(dirty) != "" {
 				linesCount := len(strings.Split(strings.TrimRight(dirty, "\n"), "\n"))
 				commitItems = append(commitItems, makeSetupItem("todo", fmt.Sprintf("%d uncommitted path(s) in the umbrella; a cycle pauses on any outside its write scope", linesCount), `git add -A && git commit -m "chore: set up the OpenSpec kit"`))

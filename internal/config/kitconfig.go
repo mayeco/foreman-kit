@@ -1756,7 +1756,9 @@ func checkApplicationProblems(root string) FileProblems {
 	}
 
 	ctx := context.Background()
-	statusArgs := []string{"status", "--porcelain", "--ignore-submodules=all", "--", "."}
+	// A check is a read, and the portal answers a GET with it: --no-optional-locks keeps git from
+	// refreshing (rewriting) .git/index, which would collide with the merger or the dispatcher.
+	statusArgs := []string{"--no-optional-locks", "status", "--porcelain", "--ignore-submodules=all", "--", "."}
 	for _, sp := range ScopeWritePaths {
 		statusArgs = append(statusArgs, ":!"+sp)
 	}

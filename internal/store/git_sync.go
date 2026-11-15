@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -263,6 +265,12 @@ func numberOrNil(v any) any {
 		return float64(n)
 	case int64:
 		return float64(n)
+	case string:
+		// A number written as a string ("0.8") counts, as it does for the dispatcher
+		// (orchestrator.BacklogItemFromMap); NaN and Inf are not scores.
+		if f, err := strconv.ParseFloat(strings.TrimSpace(n), 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+			return f
+		}
 	}
 	return nil
 }
@@ -342,16 +350,39 @@ func readJSONMapSlice(path string) []map[string]any {
 	return list
 }
 
-// readJSONMapSliceWhole is readJSONMapSlice, and says whether the file is a JSON list that was read
-// whole. A file that is missing, empty, or only read line by line (one caught half-written, or in
-// the middle of a merge) is not: what it leaves out may still be there.
+// readJSONMapSliceWhole is readJSONMapSlice, and says whether the file was read whole. It is the one
+// reader of the backlog, the history and the proposals the mirror has, and it takes the shapes the
+// dispatcher, the merger and cycle.ReadJSONList take: one JSON document that is a list, or an object
+// whose "changes" member is a list (the legacy wrapper). Elements that are not objects are skipped.
+// A file that is missing, empty, holds another JSON value (an object without a "changes" list, a
+// scalar), or is only read line by line (one caught half-written, or in the middle of a merge) is not
+// read whole: what it leaves out may still be there.
 func readJSONMapSliceWhole(path string) ([]map[string]any, bool) {
 	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 {
+	if err != nil || len(strings.TrimSpace(string(raw))) == 0 {
 		return nil, false
 	}
-	var list []map[string]any
-	if json.Unmarshal(raw, &list) == nil {
+	var doc any
+	if json.Unmarshal(raw, &doc) == nil {
+		var elements []any
+		switch v := doc.(type) {
+		case []any:
+			elements = v
+		case map[string]any:
+			changes, ok := v["changes"].([]any)
+			if !ok {
+				return nil, false
+			}
+			elements = changes
+		default:
+			return nil, false
+		}
+		list := make([]map[string]any, 0, len(elements))
+		for _, el := range elements {
+			if m, ok := el.(map[string]any); ok {
+				list = append(list, m)
+			}
+		}
 		return list, true
 	}
 	// Support one-object-per-line NDJSON format

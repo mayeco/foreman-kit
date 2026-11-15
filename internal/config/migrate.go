@@ -153,6 +153,12 @@ func formerCommands(data map[string]any) bool {
 // commands changed since. An application whose file still holds one of them exactly, as the kit
 // wrote it, gets the commands shipped today from `foreman-kit update`; one a person edited is kept.
 var earlierShippedCommands = map[string][]AgentCommandSpec{
+	// Before the restricted command allowed foreman-kit evaluate, sim, portal and config check.
+	"claude": {{
+		Run:        SUPPORTED["claude"].Run,
+		Restricted: strings.Replace(SUPPORTED["claude"].Restricted, claudeAllowedTools, formerClaudeAllowedTools, 1),
+		Ping:       SUPPORTED["claude"].Ping,
+	}},
 	// Before hermes was declared detached (its CLI hands each call to the hermes gateway).
 	"hermes": {{Run: "hermes -z {{prompt}} --yolo --accept-hooks {{args}}", Ping: "hermes -z {{prompt}} {{args}}"}},
 	// Before opencode ran with a private server (--standalone) instead of its background service.

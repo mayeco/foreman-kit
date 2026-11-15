@@ -75,9 +75,15 @@ type AgentCommandSpec struct {
 
 // The tool lists the kit ships in the commands of Claude Code and GitHub Copilot.
 const (
-	claudeAllowedTools = "Read Edit Write Glob Grep Bash(openspec *) Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git show *) Bash(git rev-parse *) Bash(foreman-kit gates *) Bash(foreman-kit exec *) Bash(foreman-kit status *) Bash(foreman-kit progress *) Bash(foreman-kit completed-since *) Bash(foreman-kit evaluation-report *) Bash(foreman-kit prompt-report *) Bash(foreman-kit memory *) Bash(agent-memory *) Bash(foreman-kit visual-qa *) Bash(jev noul *) Bash(jev choice *) Bash(jev score *) Bash(jev eval *) Bash(jev validate *)"
-	claudeDeniedTools  = "Bash(git commit *) Bash(git push *) Bash(git rebase *) Bash(git reset *) Bash(git checkout *) Bash(git switch *) Bash(rm -rf *)"
-	copilotDenied      = `--deny-tool "shell(git commit)" --deny-tool "shell(git push)" --deny-tool "shell(git rebase)" --deny-tool "shell(git reset)" --deny-tool "shell(git checkout)" --deny-tool "shell(git switch)"`
+	// claudeAllowedTools lists what a restricted Claude Code agent may run: the foreman-kit
+	// subcommands the cycle prompt and the cycle and QA skills tell it to run (evaluate, sim, portal
+	// and config check among them; config set stays denied), and the evaluator's jev commands.
+	claudeAllowedTools = "Read Edit Write Glob Grep Bash(openspec *) Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git show *) Bash(git rev-parse *) Bash(foreman-kit gates *) Bash(foreman-kit exec *) Bash(foreman-kit status *) Bash(foreman-kit progress *) Bash(foreman-kit completed-since *) Bash(foreman-kit evaluation-report *) Bash(foreman-kit prompt-report *) Bash(foreman-kit memory *) Bash(agent-memory *) Bash(foreman-kit visual-qa *) Bash(foreman-kit evaluate *) Bash(foreman-kit sim *) Bash(foreman-kit portal *) Bash(foreman-kit config check *) Bash(jev noul *) Bash(jev choice *) Bash(jev score *) Bash(jev eval *) Bash(jev validate *)"
+	// formerClaudeAllowedTools is the list earlier foreman-kit versions shipped, before evaluate, sim,
+	// portal and config check: `foreman-kit update` replaces a command that still holds it.
+	formerClaudeAllowedTools = "Read Edit Write Glob Grep Bash(openspec *) Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git show *) Bash(git rev-parse *) Bash(foreman-kit gates *) Bash(foreman-kit exec *) Bash(foreman-kit status *) Bash(foreman-kit progress *) Bash(foreman-kit completed-since *) Bash(foreman-kit evaluation-report *) Bash(foreman-kit prompt-report *) Bash(foreman-kit memory *) Bash(agent-memory *) Bash(foreman-kit visual-qa *) Bash(jev noul *) Bash(jev choice *) Bash(jev score *) Bash(jev eval *) Bash(jev validate *)"
+	claudeDeniedTools        = "Bash(git commit *) Bash(git push *) Bash(git rebase *) Bash(git reset *) Bash(git checkout *) Bash(git switch *) Bash(rm -rf *)"
+	copilotDenied            = `--deny-tool "shell(git commit)" --deny-tool "shell(git push)" --deny-tool "shell(git rebase)" --deny-tool "shell(git reset)" --deny-tool "shell(git checkout)" --deny-tool "shell(git switch)"`
 	// ShippedClaudeBudget is the spending cap, in dollars, the kit writes in Claude Code's commands.
 	ShippedClaudeBudget = "5"
 )

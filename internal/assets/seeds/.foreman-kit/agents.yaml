@@ -115,10 +115,11 @@ commands:
       Bash(foreman-kit gates *) Bash(foreman-kit exec *) Bash(foreman-kit status *)
       Bash(foreman-kit progress *) Bash(foreman-kit completed-since *) Bash(foreman-kit
       evaluation-report *) Bash(foreman-kit prompt-report *) Bash(foreman-kit memory *)
-      Bash(agent-memory *) Bash(foreman-kit visual-qa *) Bash(jev noul *) Bash(jev choice *)
-      Bash(jev score *) Bash(jev eval *) Bash(jev validate *)" --disallowedTools "Bash(git
-      commit *) Bash(git push *) Bash(git rebase *) Bash(git reset *) Bash(git checkout *)
-      Bash(git switch *) Bash(rm -rf *)" {{args}}
+      Bash(agent-memory *) Bash(foreman-kit visual-qa *) Bash(foreman-kit evaluate *)
+      Bash(foreman-kit sim *) Bash(foreman-kit portal *) Bash(foreman-kit config check *)
+      Bash(jev noul *) Bash(jev choice *) Bash(jev score *) Bash(jev eval *) Bash(jev validate
+      *)" --disallowedTools "Bash(git commit *) Bash(git push *) Bash(git rebase *) Bash(git
+      reset *) Bash(git checkout *) Bash(git switch *) Bash(rm -rf *)" {{args}}
     ping: claude -p {{prompt}} --no-session-persistence --max-budget-usd 0.50 {{args}}
   agy:
     run: agy -p {{prompt}} --print-timeout {{timeout}}s --dangerously-skip-permissions {{args}}

@@ -305,7 +305,7 @@ func spawnDetachedDaemonProcess(root string, web bool, bind string, port int, po
 		"daemon", "run",
 		"--bind", bind,
 		"--port", strconv.Itoa(port),
-		"--interval", interval.String(),
+		"--interval", settings.FormatDuration(interval),
 	}
 	if web {
 		args = append(args, "--web=true")
@@ -1056,32 +1056,23 @@ func RunDaemonCLI(ctx context.Context, root string, st *store.Store, baseOpts Da
 			opts.Bind = strings.TrimPrefix(a, "--bind=")
 		case a == "--interval" && i+1 < len(args):
 			i++
-			d, err := time.ParseDuration(args[i])
+			d, err := ParseInterval(args[i])
 			if err != nil {
-				if mins, err2 := strconv.Atoi(args[i]); err2 == nil && mins > 0 {
-					d = time.Duration(mins) * time.Minute
-				} else {
-					fmt.Fprintf(stderr, "daemon: invalid interval %q\n", args[i])
-					return 2
-				}
+				fmt.Fprintf(stderr, "daemon: %v\n", err)
+				return 2
 			}
 			opts.Interval = d
 		case strings.HasPrefix(a, "--interval="):
-			val := strings.TrimPrefix(a, "--interval=")
-			d, err := time.ParseDuration(val)
+			d, err := ParseInterval(strings.TrimPrefix(a, "--interval="))
 			if err != nil {
-				if mins, err2 := strconv.Atoi(val); err2 == nil && mins > 0 {
-					d = time.Duration(mins) * time.Minute
-				} else {
-					fmt.Fprintf(stderr, "daemon: invalid interval %q\n", val)
-					return 2
-				}
+				fmt.Fprintf(stderr, "daemon: %v\n", err)
+				return 2
 			}
 			opts.Interval = d
 		case a == "--no-initial-cycle":
 			opts.NoInitialCycle = true
 		default:
-			fmt.Fprintf(stderr, "Usage: foreman-kit daemon [start|run|stop|status|restart] [-d|--daemon] [-w|--web] [--port 4567] [--bind 127.0.0.1] [--interval 60m]\n")
+			fmt.Fprintf(stderr, "Usage: %s\n", DaemonUsage)
 			return 2
 		}
 	}
@@ -1107,9 +1098,44 @@ func RunDaemonCLI(ctx context.Context, root string, st *store.Store, baseOpts Da
 	case "start", "run":
 		return StartDaemon(ctx, root, st, opts, stdout, stderr)
 	default:
-		fmt.Fprintf(stderr, "Usage: foreman-kit daemon [start|run|stop|status|restart] [-d|--daemon] [-w|--web] [--port 4567] [--bind 127.0.0.1] [--interval 60m]\n")
+		fmt.Fprintf(stderr, "Usage: %s\n", DaemonUsage)
 		return 2
 	}
+}
+
+// DaemonUsage is the usage line of `foreman-kit daemon`, as the command shows it and as a command
+// line it refuses is answered with. It names no default: DaemonHelp says where each comes from.
+const DaemonUsage = "foreman-kit daemon [start|run|stop|status|restart] [-d|--daemon] [-w|--web] [--port N] [--bind ADDR] [--interval TIME]"
+
+// DaemonHelp is the help of `foreman-kit daemon` (the command brings its own usage line): what
+// each of --port, --bind and --interval sets, and the key of .foreman-kit/daemon.yaml its value
+// comes from when the option is left out. It is built from the catalog, so a default is written
+// nowhere else.
+func DaemonHelp() string {
+	every := settings.Of(settings.CycleEvery)
+	return fmt.Sprintf("Manage the per-project background daemon: start, run, stop or restart it, or say how it is.\n\n"+
+		"Options:\n"+
+		"  --port N         the port the portal listens on, a whole number from 1 to %d\n"+
+		"                   (default: %s)\n"+
+		"  --bind ADDR      the address the portal listens on\n"+
+		"                   (default: %s)\n"+
+		"  --interval TIME  the longest the daemon waits between the start of two cycles;\n"+
+		"                   takes %s\n"+
+		"                   (default: %s)\n",
+		settings.PortMax, settings.DaemonPort.Where(), settings.DaemonBind.Where(),
+		every.Expected(), settings.CycleEvery.Where())
+}
+
+// ParseInterval reads the value of --interval, the run's value for settings.CycleEvery, by the rule
+// of the key: a time with its unit (90s is 1m30s, a bare 90 has none), 1m or more. The error names
+// the option, what was given and the key.
+func ParseInterval(text string) (time.Duration, error) {
+	v, err := settings.Of(settings.CycleEvery).ParseOption("--interval", text)
+	if err != nil {
+		return 0, err
+	}
+	d, _ := v.(time.Duration)
+	return d, nil
 }
 
 // givenForTheRun writes what --set gave a run the way its command line did ("" for nothing):

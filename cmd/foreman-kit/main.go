@@ -67,7 +67,7 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 		rootWeb            bool
 		rootPort           int
 		rootBind           string
-		rootInterval       time.Duration
+		rootInterval       string
 		rootNoInitialCycle bool
 	)
 
@@ -86,9 +86,10 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 	rootCmd.SetErr(stderr)
 	rootCmd.Flags().BoolVarP(&rootDaemon, "daemon", "d", false, "Start the per-project background daemon in the current directory")
 	rootCmd.Flags().BoolVarP(&rootWeb, "web", "w", false, "Start the embedded web portal (with -d for background daemon, or standalone)")
-	rootCmd.Flags().IntVar(&rootPort, "port", 0, "TCP port for the embedded web portal (default 4567)")
-	rootCmd.Flags().StringVar(&rootBind, "bind", "", "Bind address for the embedded web portal (default 127.0.0.1)")
-	rootCmd.Flags().DurationVar(&rootInterval, "interval", 0, "Interval between scheduled cycles inside the daemon (default 60m)")
+	rootCmd.Flags().IntVar(&rootPort, "port", 0, "TCP port for the embedded web portal (default: "+settings.DaemonPort.Where()+")")
+	rootCmd.Flags().StringVar(&rootBind, "bind", "", "Bind address for the embedded web portal (default: "+settings.DaemonBind.Where()+")")
+	rootCmd.Flags().StringVar(&rootInterval, "interval", "", "Interval between scheduled cycles inside the daemon: "+
+		settings.Of(settings.CycleEvery).Expected()+" (default: "+settings.CycleEvery.Where()+")")
 	rootCmd.Flags().BoolVar(&rootNoInitialCycle, "no-initial-cycle", false, "Do not run an immediate cycle upon daemon startup")
 
 	openWorkspaceStore := func() (string, *store.Store, error) {
@@ -218,6 +219,17 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			fmt.Fprintf(stderr, "foreman-kit: --port %d is not a port: give a whole number from 1 to %d\n", rootPort, settings.PortMax)
 			return wrapCode(2)
 		}
+		// A --interval the key refuses stops the command as the key's own file would: a time with its
+		// unit, 1m or more. Left out, the daemon reads the key.
+		var interval time.Duration
+		if cmd.Flags().Changed("interval") {
+			d, err := cycle.ParseInterval(rootInterval)
+			if err != nil {
+				fmt.Fprintf(stderr, "foreman-kit: %v\n", err)
+				return wrapCode(2)
+			}
+			interval = d
+		}
 		if rootDaemon {
 			root, st, err := openWorkspaceStore()
 			if err != nil {
@@ -232,7 +244,7 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			dOpts.Port = rootPort
 			dOpts.PortExplicit = cmd.Flags().Changed("port")
 			dOpts.Bind = rootBind
-			dOpts.Interval = rootInterval
+			dOpts.Interval = interval
 			dOpts.NoInitialCycle = rootNoInitialCycle
 			return wrapCode(cycle.StartDaemon(ctx, root, st, dOpts, stdout, stderr))
 		}
@@ -254,7 +266,7 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 		}
 		return runHere(ctx, cmd, stdout, stderr, buildDaemonOptions, foregroundFlags{
 			port: rootPort, portSet: cmd.Flags().Changed("port"), bind: rootBind,
-			interval: rootInterval, noInitialCycle: rootNoInitialCycle,
+			interval: interval, noInitialCycle: rootNoInitialCycle,
 		})
 	}
 
@@ -962,8 +974,9 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 
 	// 34. daemon
 	daemonCmd := &cobra.Command{
-		Use:                "daemon [start|run|stop|status|restart] [-d|--daemon] [-w|--web] [--port 4567] [--bind 127.0.0.1] [--interval 60m]",
+		Use:                "daemon [start|run|stop|status|restart] [-d|--daemon] [-w|--web] [--port N] [--bind ADDR] [--interval TIME]",
 		Short:              "Manage the per-project background daemon",
+		Long:               cycle.DaemonHelp(),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hasHelpFlag(args) {

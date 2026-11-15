@@ -162,6 +162,17 @@ func (s Setting) Parse(raw any) (any, bool) {
 	return nil, false
 }
 
+// ParseOption reads text, what an option of the command line (option, "--interval") gives for this
+// setting in one run, by the rule its file holds: the same Parse a value of the file or of --set
+// goes through. It returns the value with the type Parse gives, or an error that names the option,
+// what was given, what the setting accepts and the key the option stands in for.
+func (s Setting) ParseOption(option, text string) (any, error) {
+	if v, ok := s.Parse(text); ok {
+		return v, nil
+	}
+	return nil, fmt.Errorf("%s %q: %s (it is the run's value for %s)", option, text, s.Problem(text), s.Key)
+}
+
 // Expected says, in words, what the setting accepts.
 func (s Setting) Expected() string {
 	switch s.Kind {

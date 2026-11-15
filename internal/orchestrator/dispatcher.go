@@ -514,12 +514,22 @@ func (d *Dispatcher) DryRun(ctx context.Context) (*DryRunReport, error) {
 		})
 	}
 
+	// The names the registry holds as discarded, among the backlog's items and what they depend on.
+	discarded := make(map[string]bool)
+	for _, item := range backlog {
+		for _, name := range append([]string{item.ChangeName}, item.DependsOn...) {
+			if _, seen := discarded[name]; !seen {
+				discarded[name] = d.isDiscarded(ctx, name)
+			}
+		}
+	}
+
 	now := d.nowFunc()
 	for _, item := range backlog {
 		if archived[item.ChangeName] {
 			continue
 		}
-		rows = append(rows, d.buildDryRunRow(item, waited, running, buildingSet, readySet, inFlightCapsMap, qByName, byName, archived, now))
+		rows = append(rows, d.buildDryRunRow(item, waited, running, buildingSet, readySet, inFlightCapsMap, qByName, byName, archived, discarded, now))
 	}
 
 	if held := heldByBrokenBases(ctx, d.root, d.store, readyManifests, d.cfg().OutsideCommits); len(held) > 0 {
@@ -575,6 +585,7 @@ func (d *Dispatcher) buildDryRunRow(
 	quarantined map[string]store.QuarantineRecord,
 	byName map[string]BacklogItem,
 	archived map[string]bool,
+	discarded map[string]bool,
 	now time.Time,
 ) DryRunItem {
 	change := item.ChangeName
@@ -613,6 +624,9 @@ func (d *Dispatcher) buildDryRunRow(
 	}
 
 	switch {
+	case discarded[change]:
+		state = "discarded"
+		why = discardedWhy(change)
 	case building[change]:
 		state = "building"
 		why = "building now"
@@ -631,7 +645,7 @@ func (d *Dispatcher) buildDryRunRow(
 		state = "waiting"
 		var parts []string
 		for _, dep := range unarchivedDeps {
-			parts = append(parts, fmt.Sprintf("%s (%s)", dep, d.dependencyState(dep, building, ready, quarantined, byName)))
+			parts = append(parts, fmt.Sprintf("%s (%s)", dep, d.dependencyState(dep, building, ready, discarded, quarantined, byName)))
 		}
 		why = "waits for " + strings.Join(parts, ", ")
 	case len(sharedCaps) > 0:
@@ -662,7 +676,23 @@ func (d *Dispatcher) buildDryRunRow(
 	}
 }
 
-func (d *Dispatcher) dependencyState(dep string, building, ready map[string]bool, quarantined map[string]store.QuarantineRecord, byName map[string]BacklogItem) string {
+// discardedWhy is what the dry run and the log say of a backlog item whose name was abandoned.
+func discardedWhy(change string) string {
+	return fmt.Sprintf("discarded: %s was abandoned earlier and is never built again; queue the work under a new name", change)
+}
+
+// isDiscarded reports whether the registry holds the change as discarded: abandoned for good, like an
+// integrated change is finished. Every reader of the registry (status, the portal, the cap on the queue)
+// says discarded for such a name, so the dispatcher never starts it.
+func (d *Dispatcher) isDiscarded(ctx context.Context, change string) bool {
+	state, err := d.store.ChangeState(ctx, change)
+	return err == nil && state == store.ChangeDiscarded
+}
+
+func (d *Dispatcher) dependencyState(dep string, building, ready, discarded map[string]bool, quarantined map[string]store.QuarantineRecord, byName map[string]BacklogItem) string {
+	if discarded[dep] {
+		return "discarded"
+	}
 	if building[dep] {
 		return "building"
 	}
@@ -1938,6 +1968,16 @@ func (d *Dispatcher) requeueRequestedRebuilds(ctx context.Context) {
 func (d *Dispatcher) isEligible(ctx context.Context, item BacklogItem) bool {
 	change := item.ChangeName
 	if d.isBlocked(ctx, change) || d.isInReadyQueue(ctx, change) {
+		return false
+	}
+	if d.isDiscarded(ctx, change) {
+		d.stateMu.Lock()
+		first := !d.reported["change.discarded:"+change]
+		d.reported["change.discarded:"+change] = true
+		d.stateMu.Unlock()
+		if first {
+			d.logf("dispatcher: %s", discardedWhy(change))
+		}
 		return false
 	}
 	d.stateMu.Lock()

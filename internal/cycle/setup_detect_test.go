@@ -314,7 +314,7 @@ func TestDetectGoWritesNoGuessedPort(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cfg struct {
-		// The template's section for the dev server (named "dev" in the specification).
+		// The template's section for the dev server: port and health_endpoint sit under service.
 		Service map[string]any `yaml:"service"`
 	}
 	if err := yaml.Unmarshal([]byte(text), &cfg); err != nil {

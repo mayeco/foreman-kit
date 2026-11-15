@@ -24,8 +24,9 @@ const agentsPeriod = "7d"
 type agentRow struct {
 	Name  string `json:"name"`
 	Label string `json:"label,omitempty"`
-	// Known says the kit ships a way to run it. An engine it does not ship (one an older kit ran,
-	// the stand-in of a simulation) is listed while the registry has it on record.
+	// Known says the kit has a way to run it: it ships one, or this application declares one. An
+	// engine it has neither for (one an older kit ran, the stand-in of a simulation) is listed while
+	// the registry has it on record.
 	Known bool `json:"known"`
 	// Installed says its command is on PATH; Selected, that this application uses it; Roles, the
 	// roles of the application that try it.

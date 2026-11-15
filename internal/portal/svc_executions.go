@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -194,17 +195,75 @@ func (x *executions) Engines() []EngineChoice {
 			roles[name] = append(roles[name], role)
 		}
 	}
-	out := make([]EngineChoice, 0, len(cycle.SupportedAgentOrder))
-	for _, name := range cycle.SupportedAgentOrder {
+	names := append([]string(nil), cycle.SupportedAgentOrder...)
+	names = append(names, x.declaredEngines()...)
+	out := make([]EngineChoice, 0, len(names))
+	for _, name := range names {
 		// An agent runs with the command the application writes for it: that is the one to find.
 		_, err := exec.LookPath(config.ExecutableBinary(x.root, name))
-		choice := EngineChoice{Name: name, Label: cycle.SupportedAgents[name].Label, Installed: err == nil, Selected: selected[name], Roles: roles[name]}
+		label := declaredEngineLabel
+		if meta, shipped := cycle.SupportedAgents[name]; shipped {
+			label = meta.Label
+		}
+		choice := EngineChoice{Name: name, Label: label, Installed: err == nil, Selected: selected[name], Roles: roles[name]}
 		if choice.Roles == nil {
 			choice.Roles = []string{}
 		}
 		out = append(out, choice)
 	}
 	return out
+}
+
+// declaredEngineLabel is the label of an engine the kit does not ship and this application declares.
+const declaredEngineLabel = "declared by this application"
+
+// declaredEngines lists the agents this application declares and the kit does not ship, in the
+// order .foreman-kit/agents.yaml names them: those of agents:, those of each role, and those with
+// commands:. The dispatcher runs each of them, so a prompt can run on them too.
+func (x *executions) declaredEngines() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if _, shipped := cycle.SupportedAgents[name]; shipped || seen[name] || name == "" || name == autoEngine || name == stubEngine {
+			return
+		}
+		// The kit is given the engines of a run as one comma-separated list.
+		if strings.ContainsAny(name, ", 	\r\n") {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, name := range cycle.LoadAgentsConfig(x.root).Agents {
+		add(name)
+	}
+	for _, role := range settings.Roles {
+		for _, name := range cycle.RoleEngines(x.root, role) {
+			add(name)
+		}
+	}
+	if cfg := config.Load(x.root); cfg != nil {
+		commands := make([]string, 0, len(cfg.Commands))
+		for name := range cfg.Commands {
+			commands = append(commands, name)
+		}
+		sort.Strings(commands)
+		for _, name := range commands {
+			add(name)
+		}
+	}
+	return out
+}
+
+// declares reports whether this application declares the agent name, which the kit does not ship.
+func (x *executions) declares(name string) bool {
+	for _, declared := range x.declaredEngines() {
+		if declared == name {
+			return true
+		}
+	}
+	return false
 }
 
 // SettingValue is a setting as it stands in this application: the value the commands of the kit
@@ -259,6 +318,9 @@ func (x *executions) Ping(ctx context.Context, name string) (PingResult, error) 
 	name = strings.TrimSpace(name)
 	var res PingResult
 	switch _, known := cycle.SupportedAgents[name]; {
+	case !known && x.declares(name):
+		// An agent the application declares: its own ping command, or else its run command.
+		res = x.kit.PingEngine(ctx, x.root, name)
 	case name == stubEngine:
 		res = PingResult{Engine: name, Status: "ok", Health: "ok", Output: "pong"}
 		if stub := strings.TrimSpace(os.Getenv("AGENT_STUB")); stub == "" || !isFile(stub) {
@@ -336,7 +398,7 @@ func (x *executions) startAgent(ctx context.Context, in AgentRun) (store.Executi
 	}
 	engine := strings.TrimSpace(in.Engine)
 	if engine != "" && engine != autoEngine && engine != "stub" {
-		if _, ok := cycle.SupportedAgents[engine]; !ok {
+		if _, ok := cycle.SupportedAgents[engine]; !ok && !x.declares(engine) {
 			return store.Execution{}, errInvalid("%q is not an agent the kit knows", engine)
 		}
 	}

@@ -282,7 +282,7 @@ func (w *workspace) waits() []ProcessWait {
 	add("The merger", pipeline.MergerWaits())
 	add("The cycle", whyOf(cycle.RequireUsable(w.root, settings.CycleFiles...)))
 	add("The visual session", whyOf(cycle.RequireUsable(w.root, settings.VisualSessionFiles...)))
-	add("The daemon, when it starts", settings.Unusable(w.root, settings.DaemonFiles...))
+	add("The daemon, when it starts", config.Unusable(w.root, settings.DaemonFiles...))
 	return out
 }
 

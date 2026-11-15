@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mayeco/foreman-kit/internal/config"
 	"github.com/mayeco/foreman-kit/internal/gitx"
 	"github.com/mayeco/foreman-kit/internal/proc"
 	"github.com/mayeco/foreman-kit/internal/settings"
@@ -141,12 +142,12 @@ func FindAvailablePort(bind string, preferredPort int, explicit bool) (int, erro
 }
 
 // daemonFileUnusable says why a daemon of the application at root does not start ("" when it can):
-// what keeps .foreman-kit/daemon.yaml from being used (settings.Reader.Unusable).
+// what keeps .foreman-kit/daemon.yaml from being used (config.Unusable).
 func daemonFileUnusable(root string) string {
 	if root == "" {
 		return ""
 	}
-	return settings.Unusable(root, settings.DaemonFiles...)
+	return config.Unusable(root, settings.DaemonFiles...)
 }
 
 // StartDaemon starts the per-project daemon either in the background (when opts.Detach == true)

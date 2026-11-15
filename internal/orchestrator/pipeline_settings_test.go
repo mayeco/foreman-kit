@@ -181,7 +181,7 @@ func TestDispatcherAndMergerWaitForTheFilesEachReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := disp.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "dispatcher: roles.build.agents in .foreman-kit/agents.yaml lists no agent") {
+	if err := disp.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "dispatcher: .foreman-kit/agents.yaml: roles.build.agents: lists no agent") {
 		t.Errorf("a dispatcher ran with a role that lists no agent: %v", err)
 	}
 }

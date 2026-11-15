@@ -21,7 +21,7 @@ func TestDispatcherServeSwitchesEnginesWhenAgentsYAMLChanges(t *testing.T) {
 	defer cancel()
 	umbrellaDir, _, _, st := setupTestWorkspaceWithSubmodule(t)
 	writeRoles := func(engine string) {
-		settingstest.WriteFile(t, umbrellaDir, "agents", "roles:\n  plan:\n    agents: ["+engine+"]\n  build:\n    agents: ["+engine+"]\n")
+		settingstest.WriteFile(t, umbrellaDir, "agents", "roles:\n  plan:\n    agents: ["+engine+"]\n  build:\n    agents: ["+engine+"]\ncommands:\n  engine-out:\n    run: \"engine-out {{prompt}}\"\n    ping: \"engine-out ping\"\n  engine-ok:\n    run: \"engine-ok {{prompt}}\"\n    ping: \"engine-ok ping\"\n")
 	}
 	writeRoles("engine-out")
 

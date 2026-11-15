@@ -1818,40 +1818,7 @@ func Check(root string) map[string]FileProblems {
 	evaluatorData, _, _ := loadConfigYAML(root, settings.EvaluatorFile)
 
 	for _, section := range configSections() {
-		rel := configFile(section)
-		rep := FileProblems{Errors: []string{}, Warnings: []string{}}
-		data, present, err := loadConfigYAML(root, section)
-		if err != nil {
-			rep.Errors = append(rep.Errors, err.Error())
-			files[rel] = rep
-			continue
-		}
-		if !present {
-			missing := "missing (foreman-kit update writes it)"
-			if section == settings.EvaluatorFile && fileExists(filepath.Join(root, filepath.FromSlash(evaluator.LegacyPolicyFile))) {
-				// An application installed before the file was renamed: its gates are still there.
-				missing = fmt.Sprintf("missing: %s has not been renamed to it (foreman-kit update)", evaluator.LegacyPolicyFile)
-			}
-			rep.Errors = append(rep.Errors, missing)
-			files[rel] = rep
-			continue
-		}
-		checkSectionSettings(root, section, data, &rep)
-		switch section {
-		case "agents":
-			checkAgentsSection(root, data, &rep)
-		case "cycle":
-			checkCycleSection(root, data, &rep, evaluatorData)
-		case "daemon":
-			checkDaemonSection(root, data, &rep)
-		case "visual_qa":
-			checkVisualQASection(root, data, &rep)
-		case "exploration":
-			checkExplorationSection(root, data, &rep)
-		case settings.EvaluatorFile:
-			checkEvaluatorSection(root, data, &rep)
-		}
-		files[rel] = rep
+		files[configFile(section)] = checkConfigFile(root, section, evaluatorData)
 	}
 
 	backlogRep := FileProblems{Errors: []string{}, Warnings: []string{}}

@@ -738,7 +738,7 @@ type PipelineSettings struct {
 	OutageGiveUpAfter int
 
 	// dispatcherWaits and mergerWaits say what keeps a file each of them reads from being used
-	// ("" when nothing does): see settings.Reader.Unusable.
+	// ("" when nothing does): see config.Unusable.
 	dispatcherWaits string
 	mergerWaits     string
 }
@@ -757,8 +757,8 @@ func LoadPipelineSettings(root string) PipelineSettings {
 		// The files are judged as they are written, whatever --set gave this run: each of the
 		// two reads its own, and neither waits for a file it does not read. The same Reader gives
 		// the values below, so each file is read once.
-		dispatcherWaits = r.Unusable(settings.DispatcherFiles...)
-		mergerWaits = r.Unusable(settings.MergerFiles...)
+		dispatcherWaits = config.Unusable(root, settings.DispatcherFiles...)
+		mergerWaits = config.Unusable(root, settings.MergerFiles...)
 		// The gates of a repository run as its repo.config.yaml says: one that still holds the keys
 		// an older foreman-kit read keeps both from starting anything, like a file of their own.
 		if older := config.RepoConfigsUnusable(root); older != "" {

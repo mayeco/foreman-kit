@@ -889,7 +889,7 @@ func RunAgentExecCLI(ctx context.Context, st *store.Store, args []string, stdout
 	// A call started by hand is new work: it does not run on a .foreman-kit/agents.yaml that lacks a key
 	// or holds one it cannot use. The calls of a change already being built are not stopped here:
 	// the dispatcher and the cycle check before they start one.
-	if why := settings.Unusable(agentExecAppRoot("", args[0]), settings.AgentCallFiles...); why != "" {
+	if why := config.Unusable(agentExecAppRoot("", args[0]), settings.AgentCallFiles...); why != "" {
 		fmt.Fprintf(stderr, "agent_exec: %s: no agent runs until it is mended\n", why)
 		return ExitConfig
 	}

@@ -82,7 +82,7 @@ func (fe *faultEnv) agentDetachedGateway() error {
 	fe.backlog("detached-stopped")
 	_ = fe.dispatch(1, time.Time{})
 	execs, _ := fe.db.ListExecutions(fe.ctx, "worker", "detached-stopped", 0)
-	why := settings.Unusable(fe.ws(), settings.DispatcherFiles...)
+	why := config.Unusable(fe.ws(), settings.DispatcherFiles...)
 	if err := fe.check("a detached agent without a stop command in the build role: the dispatcher starts nothing and says why",
 		len(execs) == 0 && strings.Contains(why, "sim-agent-detached-hang is detached")); err != nil {
 		return err

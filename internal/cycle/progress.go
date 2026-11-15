@@ -48,13 +48,13 @@ func RequireBaseBranch(root string) (string, error) {
 // RequireUsable returns why a process of the application at root that reads the configuration files
 // called names starts no new work, or nil when it can: the application names no base branch, or one
 // of the files lacks a key, holds a value the key does not accept, or writes a key nothing reads
-// (settings.Reader.Unusable). A process does not work with a value nobody wrote: it says which key
+// (config.Unusable). A process does not work with a value nobody wrote: it says which key
 // keeps it and runs again when the file is mended.
 func RequireUsable(root string, names ...string) error {
 	if _, err := RequireBaseBranch(root); err != nil {
 		return err
 	}
-	if why := settings.Unusable(root, names...); why != "" {
+	if why := config.Unusable(root, names...); why != "" {
 		return errors.New(why + ": nothing new starts until it is mended")
 	}
 	if why := config.RepoConfigsUnusable(root); why != "" {
@@ -206,7 +206,7 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 	for _, f := range settings.Files() {
 		every = append(every, f.Name)
 	}
-	why := settings.Unusable(root, every...)
+	why := config.Unusable(root, every...)
 	if why == "" {
 		why = config.RepoConfigsUnusable(root)
 	}

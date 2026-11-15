@@ -453,6 +453,7 @@ type IntegratedChange struct {
 // (git log --reverse --topo-order baseRev..headRev; all commits when baseRev == "") that carries an
 // "OpenSpec-Change: <name>" trailer. History with merge commits (a merged kit-upgrade branch, for
 // example) is handled like git does: an ancestor of baseRev is excluded whichever parent leads to it.
+// A baseRev (when not empty) or headRev that does not name a commit is an error naming the revision.
 func (r *Repo) CompletedSince(baseRev, headRev string) ([]IntegratedChange, error) {
 	headHash, err := r.resolveHash(headRev)
 	if err != nil {
@@ -460,20 +461,26 @@ func (r *Repo) CompletedSince(baseRev, headRev string) ([]IntegratedChange, erro
 	}
 	head, err := r.repo.CommitObject(headHash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gitx: revision %q is not a commit in %s: %w", headRev, r.dir, err)
 	}
 
-	// excluded holds every commit reachable from baseRev, whichever parent path leads to it.
+	// excluded holds every commit reachable from baseRev, whichever parent path leads to it. A base
+	// that does not name a commit is an error, as it is for git log: ignoring it would list the whole history.
 	excluded := make(map[plumbing.Hash]bool)
-	if baseRev != "" {
-		if baseHash, err := r.resolveHash(baseRev); err == nil && !baseHash.IsZero() {
-			if base, err := r.repo.CommitObject(baseHash); err == nil {
-				_ = object.NewCommitPreorderIter(base, nil, nil).ForEach(func(c *object.Commit) error {
-					excluded[c.Hash] = true
-					return nil
-				})
-			}
+	if strings.TrimSpace(baseRev) != "" {
+		baseHash, err := r.resolveHash(baseRev)
+		if err != nil {
+			return nil, err
 		}
+		base, err := r.repo.CommitObject(baseHash)
+		if err != nil {
+			return nil, fmt.Errorf("gitx: revision %q is not a commit in %s: %w", baseRev, r.dir, err)
+		}
+		// A shallow clone may lack older parents: the commits that are there are excluded.
+		_ = object.NewCommitPreorderIter(base, nil, nil).ForEach(func(c *object.Commit) error {
+			excluded[c.Hash] = true
+			return nil
+		})
 	}
 	if excluded[head.Hash] {
 		return nil, nil

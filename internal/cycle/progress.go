@@ -1136,16 +1136,29 @@ func CompletedSince(ctx context.Context, root, baseRev, headRev string, out io.W
 		return err
 	}
 
-	fmt.Fprintln(out, "== Integrated changes")
+	// Both revisions must name commits before anything is printed: an unknown base would otherwise list
+	// the whole history as new work, and an unknown head an empty report.
+	if strings.TrimSpace(baseRev) == "" {
+		return fmt.Errorf("the base revision is empty")
+	}
+	if _, err := repo.RevParse(baseRev); err != nil {
+		return fmt.Errorf("unknown base revision %q: %w", baseRev, err)
+	}
+	if _, err := repo.RevParse(headRev); err != nil {
+		return fmt.Errorf("unknown head revision %q: %w", headRev, err)
+	}
 	integrated, err := repo.CompletedSince(baseRev, headRev)
-	if err == nil {
-		for _, ic := range integrated {
-			short := ic.SHA
-			if len(short) > 7 {
-				short = short[:7]
-			}
-			fmt.Fprintf(out, "  %s %s (%s)\n", short, ic.ChangeName, ic.Committed)
+	if err != nil {
+		return fmt.Errorf("revisions %q..%q: %w", baseRev, headRev, err)
+	}
+
+	fmt.Fprintln(out, "== Integrated changes")
+	for _, ic := range integrated {
+		short := ic.SHA
+		if len(short) > 7 {
+			short = short[:7]
 		}
+		fmt.Fprintf(out, "  %s %s (%s)\n", short, ic.ChangeName, ic.Committed)
 	}
 
 	fmt.Fprintln(out, "== Child repository commits")

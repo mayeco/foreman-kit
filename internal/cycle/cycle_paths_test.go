@@ -68,4 +68,71 @@ func TestTheJudgmentIsGivenWhereItsFilesAreAndWhatToVerify(t *testing.T) {
 	if since, what := verifySince(ctx, app, st, "20261111T200000Z"); since != install || !strings.Contains(what, "the cycle 20261111T193002Z ran on") {
 		t.Errorf("the second cycle verifies since %q (%s)", since, what)
 	}
+
+	// A cycle that did not judge is not that point: add-other was integrated before each of these,
+	// and the next cycle still has to verify it.
+	if err := os.WriteFile(filepath.Join(app, "other.txt"), []byte("y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	later := commitAll(t, app, "chore(merge): integrate add-other")
+	for i, outcome := range []string{CycleOutcomeJudgmentFailed, CycleOutcomeScopeViolation, CycleOutcomePreflightFailed, CycleOutcomeStopped, ""} {
+		stamp := "2026111" + "2T0" + string(rune('0'+i)) + "0000Z"
+		if err := st.BeginCycle(ctx, store.Cycle{Stamp: stamp, UmbrellaSHA: later}); err != nil {
+			t.Fatal(err)
+		}
+		if outcome == "" {
+			continue // still running: no finish time
+		}
+		if err := st.FinishCycle(ctx, stamp, outcome, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if since, what := verifySince(ctx, app, st, "20261112T100000Z"); since != install || !strings.Contains(what, "the cycle 20261111T193002Z ran on") {
+		t.Errorf("after cycles that did not judge, the next verifies since %q (%s), want %s of the last completed cycle", since, what, install)
+	}
+
+	// A cycle that judged and ended is the point again, whichever of the three outcomes it has.
+	for i, outcome := range []string{CycleOutcomeDone, CycleOutcomeDispatchRunning, CycleOutcomePaused} {
+		stamp := "20261113T0" + string(rune('0'+i)) + "0000Z"
+		if err := st.BeginCycle(ctx, store.Cycle{Stamp: stamp, UmbrellaSHA: later}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishCycle(ctx, stamp, outcome, ""); err != nil {
+			t.Fatal(err)
+		}
+		if since, what := verifySince(ctx, app, st, "20261114T100000Z"); since != later || !strings.Contains(what, "the cycle "+stamp+" ran on") {
+			t.Errorf("after a cycle that ended %q the next verifies since %q (%s), want %s", outcome, since, what, later)
+		}
+	}
+}
+
+// With no cycle that judged, the commit that installed the kit is the point, however many cycles
+// failed their judgment, broke their scope or stopped before.
+func TestNoCycleThatDidNotJudgeIsWhereTheNextOneVerifiesSince(t *testing.T) {
+	t.Setenv("FOREMANKIT_FORCE_BUILTIN", "1")
+	ctx := context.Background()
+	app := filepath.Join(t.TempDir(), "app")
+	if err := Init(ctx, app, KitOptions{Agents: "claude"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, app)
+	install := commitAll(t, app, "install the kit")
+	if err := os.WriteFile(filepath.Join(app, "feature.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	integrated := commitAll(t, app, "chore(merge): integrate add-feature")
+	st := openTestStore(t, app)
+	for i, outcome := range []string{CycleOutcomeJudgmentFailed, CycleOutcomeScopeViolation, CycleOutcomePreflightFailed, CycleOutcomeStopped} {
+		stamp := "2026111" + "1T1" + string(rune('0'+i)) + "0000Z"
+		if err := st.BeginCycle(ctx, store.Cycle{Stamp: stamp, UmbrellaSHA: integrated}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishCycle(ctx, stamp, outcome, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	since, what := verifySince(ctx, app, st, "20261111T200000Z")
+	if since != install || !strings.Contains(what, "installed the kit") {
+		t.Fatalf("verifies since %q (%s), want the install commit %s", since, what, install)
+	}
 }

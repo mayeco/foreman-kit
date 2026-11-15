@@ -45,6 +45,7 @@ Add one line on health only when something is off: consecutive failures near the
 | `dispatched only (visual QA session running)` | Normal: the visual session held the judgment that hour |
 | `paused` | `log/PAUSE` exists; nothing runs until a person removes it |
 | `scope violation` | The judgment wrote outside its scope; the system paused itself and recorded nothing |
+| `judgment failed` | The judgment exited non-zero (every engine out, a crash, a timeout): the cycle recorded and dispatched, but verified nothing. The next cycle verifies what was integrated since the last cycle that judged, so no change is skipped; read `log/cycle/cycle-<stamp>.log` for why. Repeated: the agents of the `cycle` role are failing (`foreman-kit status`) |
 | `preflight failed` | An agent CLI was not logged in, a kit file was edited, or a tool was missing; see the cycle's log |
 | `stopped before the end` | The process died (killed, the computer slept); the next cycle continues. Repeated: read `log/cycle/cycle-<stamp>.log` |
 | `running (<step>)` | The newest cycle is still at that step |

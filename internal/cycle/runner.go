@@ -498,7 +498,20 @@ const (
 	CycleOutcomeScopeViolation  = "scope violation"
 	CycleOutcomePaused          = "paused"
 	CycleOutcomeStopped         = "stopped before the end"
+	// CycleOutcomeJudgmentFailed is a cycle whose judgment exited non-zero: it still recorded and
+	// dispatched, but it verified nothing, so it is not the point the next cycle verifies after.
+	CycleOutcomeJudgmentFailed = "judgment failed"
 )
+
+// judgedCycle says whether outcome is that of a cycle whose judgment ran to its end, passed the
+// scope guard and recorded: the only kind the next cycle verifies the integrated changes after.
+func judgedCycle(outcome string) bool {
+	switch outcome {
+	case CycleOutcomeDone, CycleOutcomeDispatchRunning, CycleOutcomePaused:
+		return true
+	}
+	return false
+}
 
 // CycleOptions configures RunCycle and provides callback hooks for external orchestrator/proc actions.
 type CycleOptions struct {
@@ -687,8 +700,14 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	// What the cycle did, known to it and not read from its log, which the judgment writes to as
 	// well: the strategy it picked and the engine it ran.
 	var pickedStrategy, judgeRan string
+	// judgmentFailed is set when the judgment exited non-zero: no outcome of a cycle that judged
+	// is then true of it.
+	judgmentFailed := false
 	finishExec := func(status string, code int, outcome string) {
 		finished = true
+		if judgmentFailed && judgedCycle(outcome) {
+			outcome = CycleOutcomeJudgmentFailed
+		}
 		if st != nil {
 			_ = st.FinishExecution(context.Background(), execID, status, code)
 			// The cycle's own row says what it was and how it ended: the latest finished one is the
@@ -855,6 +874,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	if opts.AgentExecFunc != nil {
 		if err := opts.AgentExecFunc(ctx, cycleWT, promptFile, engineCycle, judgmentTimeout, lw); err != nil {
 			fmt.Fprintln(lw, "cycle: agent exited non-zero")
+			judgmentFailed = true
 		}
 	}
 
@@ -1064,14 +1084,17 @@ func ensureCycleState(dir string, out io.Writer) {
 }
 
 // verifySince returns the commit of the umbrella this cycle verifies the integrated changes after,
-// and what that commit is: the one the latest earlier cycle that ended ran on, or, when no cycle
-// has, the one that installed the kit (the first to add .foreman-kit/kit.lock). A first cycle that
+// and what that commit is: the one the latest earlier cycle that judged and ended ran on (not one
+// whose judgment failed, that broke its scope or that stopped early), or, when no cycle has, the
+// one that installed the kit (the first to add .foreman-kit/kit.lock). A first cycle that
 // verified nothing left the lessons of every change integrated before it out of the memory for good.
 func verifySince(ctx context.Context, wt string, st *store.Store, stamp string) (string, string) {
 	if st != nil {
 		if cycles, err := st.ListCycles(ctx, 50); err == nil {
 			for _, c := range cycles {
-				if c.Stamp == stamp || c.UmbrellaSHA == "" || c.FinishedAt == "" {
+				// A cycle whose judgment failed, broke its scope, failed preflight or stopped early
+				// verified nothing: the changes integrated before it are still to be verified.
+				if c.Stamp == stamp || c.UmbrellaSHA == "" || c.FinishedAt == "" || !judgedCycle(c.Outcome) {
 					continue
 				}
 				if _, err := gitx.RunGit(ctx, wt, "cat-file", "-e", c.UmbrellaSHA+"^{commit}"); err != nil {

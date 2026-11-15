@@ -209,7 +209,7 @@ func cycleTone(outcome string) string {
 		return "success"
 	case strings.HasPrefix(outcome, "running"):
 		return "info"
-	case outcome == "scope violation", outcome == "preflight failed", outcome == "failed":
+	case outcome == "scope violation", outcome == "preflight failed", outcome == "failed", outcome == "judgment failed":
 		return "error"
 	case outcome == "paused", outcome == "stopped before the end":
 		return "warning"

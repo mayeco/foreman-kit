@@ -354,6 +354,9 @@ func RunBounded(ctx context.Context, opts RunOptions, name string, args ...strin
 	}
 
 	waitErr := cmd.Wait()
+	// Whether the deadline stopped the command is decided here, when its leader has just exited: the
+	// drain below can run past the deadline for a command that exited by itself within its limit.
+	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 
 	// The leader has exited and been reaped: deal with what it left in its process group.
 	stop.leaderReaped(pid)
@@ -391,7 +394,7 @@ func RunBounded(ctx context.Context, opts RunOptions, name string, args ...strin
 		return res, nil
 	}
 
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+	if timedOut {
 		res.TimedOut = true
 		res.ExitCode = 124
 		return res, nil

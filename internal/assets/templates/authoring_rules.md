@@ -32,8 +32,10 @@ Tasks:
 - Group tasks under numbered sections (`## 1. Setup`, `## 2. Core Implementation`).
 - Every task is a checkbox, `- [ ] X.Y Description`, and states its verification (a test command or an observable behavior).
 - Pair every code task with its automated test task.
+- End with one task that runs `foreman-kit gates --no-regression` in the foreground. Never write a task that asks for the regression sweep, the whole suite, enforced coverage or a background run: the dispatcher runs the regression after the build.
 
 Implementation:
-- Run `foreman-kit gates` before marking the last task complete.
+- Run `foreman-kit gates --no-regression` in the foreground before marking the last task complete. The dispatcher runs the gates and the regression after the build and sends any failure back as a repair round.
+- Never send a command to the background or wait for one; keep each command under 9 minutes.
 - If an unexpected data migration or schema change emerges, write the question to `.needs-human` in the change directory and stop.
 - Record non-obvious lessons in `handoff.md` in the change directory.

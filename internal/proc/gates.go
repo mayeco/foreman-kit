@@ -48,13 +48,16 @@ type GatesOptions struct {
 	Base       string
 	All        bool
 	Regression bool
-	Repos      []string
-	Slot       int
-	Timeout    time.Duration
-	Store      *store.Store
-	ExecID     string
-	Stdout     io.Writer
-	Stderr     io.Writer
+	// NoRegression runs the gates without the regression even when a changed file matches
+	// regression.when: an agent's run stays short, and the dispatcher runs the regression after the build.
+	NoRegression bool
+	Repos        []string
+	Slot         int
+	Timeout      time.Duration
+	Store        *store.Store
+	ExecID       string
+	Stdout       io.Writer
+	Stderr       io.Writer
 	// AcceptFailures, when set, is asked about the failed gates (labels "<repo>:<gate>", the child
 	// paths by repo name, the base ref the run diffed against, and the run's output) and returns the
 	// labels a human accepted on the repository's base (foreman-kit base accept) with a note for each:
@@ -418,7 +421,7 @@ type RepoGate struct {
 // regression commands in file order. A repository without a regression command runs nothing.
 // Un-instantiated {{...}} commands are left out (the sweep skips them with a warning).
 func RegressionSweepGates(raw []byte) ([]RepoGate, error) {
-	list, err := parseRepoGatesConfig(raw, true, nil, "", nil)
+	list, err := parseRepoGatesConfig(raw, true, false, nil, "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +434,9 @@ func RegressionSweepGates(raw []byte) ([]RepoGate, error) {
 	return out, nil
 }
 
-func parseRepoGatesConfig(raw []byte, regressionSweep bool, changedFiles []string, repoName string, stderr io.Writer) ([]orderedGate, error) {
+// noRegression leaves the regression out of a gates run (not a sweep) even when changedFiles match
+// regression.when, and says so on stderr.
+func parseRepoGatesConfig(raw []byte, regressionSweep, noRegression bool, changedFiles []string, repoName string, stderr io.Writer) ([]orderedGate, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return nil, err
@@ -504,7 +509,11 @@ func parseRepoGatesConfig(raw []byte, regressionSweep bool, changedFiles []strin
 			if note := match.ExcludedNote(repoName); note != "" && stderr != nil {
 				fmt.Fprintln(stderr, note)
 			}
-			if match.Triggered() {
+			if match.Triggered() && noRegression {
+				if stderr != nil {
+					fmt.Fprintf(stderr, "---- [info] %s: %s matches regression.when, but --no-regression skips the regression: the dispatcher runs it after the build\n", repoName, match.Hit)
+				}
+			} else if match.Triggered() {
 				if stderr != nil {
 					fmt.Fprintf(stderr, "---- [info] %s: %s matches regression.when: the regression runs after the gates\n", repoName, match.Hit)
 				}
@@ -941,7 +950,7 @@ func RunGates(ctx context.Context, opts GatesOptions) (*GatesResult, error) {
 		// OPENSPEC_CHANGED_FILES: the name a script written before the kit was called Foreman reads.
 		extraEnv := []string{"FOREMANKIT_CHANGED_FILES=" + strings.Join(childChanged, "\n"), "OPENSPEC_CHANGED_FILES=" + strings.Join(childChanged, "\n")}
 
-		gatesList, err := parseRepoGatesConfig(rawCfg, opts.Regression, childChanged, name, stderr)
+		gatesList, err := parseRepoGatesConfig(rawCfg, opts.Regression, opts.NoRegression, childChanged, name, stderr)
 		if err != nil {
 			fmt.Fprintf(stdout, "---- [FAIL] repos/%s: %v\n", name, err)
 			failed = append(failed, name+":config")
@@ -1004,7 +1013,7 @@ func RunGates(ctx context.Context, opts GatesOptions) (*GatesResult, error) {
 	}, nil
 }
 
-// RunGatesCLI implements `foreman-kit gates [--all] [--regression] [--base <ref>] [--repo <name|repos/name>]`.
+// RunGatesCLI implements `foreman-kit gates [--all] [--regression | --no-regression] [--base <ref>] [--repo <name|repos/name>]`.
 func RunGatesCLI(ctx context.Context, root string, st *store.Store, args []string, stdout, stderr io.Writer) int {
 	return RunGatesCLIWith(ctx, root, st, args, stdout, stderr, nil)
 }
@@ -1031,6 +1040,8 @@ func RunGatesCLIWith(ctx context.Context, root string, st *store.Store, args []s
 			opts.All = true
 		case "--regression":
 			opts.Regression = true
+		case "--no-regression":
+			opts.NoRegression = true
 		case "--base":
 			if i+1 >= len(args) {
 				fmt.Fprintln(stderr, "run_gates: --base needs a ref")
@@ -1046,12 +1057,17 @@ func RunGatesCLIWith(ctx context.Context, root string, st *store.Store, args []s
 			i++
 			opts.Repos = append(opts.Repos, args[i])
 		case "-h", "--help":
-			fmt.Fprintln(stdout, "Usage: foreman-kit gates [--all] [--regression] [--base <ref>] [--repo <name|repos/name>]")
+			fmt.Fprintln(stdout, "Usage: foreman-kit gates [--all] [--regression | --no-regression] [--base <ref>] [--repo <name|repos/name>]")
 			return 0
 		default:
 			fmt.Fprintf(stderr, "run_gates: unknown argument %s\n", args[i])
 			return 2
 		}
+	}
+
+	if opts.Regression && opts.NoRegression {
+		fmt.Fprintln(stderr, "run_gates: --regression and --no-regression contradict each other: --regression runs only the regression sweep, --no-regression runs the gates without it")
+		return 2
 	}
 
 	res, err := RunGates(ctx, opts)

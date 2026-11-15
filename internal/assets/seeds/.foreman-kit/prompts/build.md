@@ -38,6 +38,13 @@ and implement the pending tasks in order.
     confidence: <high, medium or low, and why>
   Write NO_ENTRY there when nothing would help a later change. Do not write to the memory (no
   `agent-memory propose`, no edit under .agent-memory/): the scheduled cycle curates it from handoff.md.
+- Run the gates as `foreman-kit gates --no-regression`, in the foreground, its output in a file under
+  `$TMPDIR`: `timeout 540 foreman-kit gates --no-regression > "$TMPDIR/gates.log" 2>&1; tail -60 "$TMPDIR/gates.log"`.
+  Never run the regression sweep yourself: the dispatcher runs the gates and the regression after you
+  finish, and sends any failure back to you as a repair round.
+- Never send a command to the background and never wait for one: this call runs unattended, a background
+  command is lost when your turn ends, and a call that only waits is stopped as idle. Keep every command
+  (a test file, a suite, the gates) in the foreground and under 9 minutes.
 
 If you hit a contradiction or a decision that needs a human (data migration, security trade-off),
 write the question to openspec/changes/{{change}}/.needs-human and stop.

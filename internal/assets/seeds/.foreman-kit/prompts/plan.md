@@ -19,6 +19,11 @@ Goal: {{goal}}
 Run `agent-memory fetch` first: it prints this workspace's conventions and the index of its memory. Then run
 `agent-memory fetch "<what this change is about>"` for the lessons and decisions of earlier changes that match.{{memory}}
 
+The tasks you write are run unattended by a build agent. Verify each task with the tests it touches and end
+tasks.md with one task that runs `foreman-kit gates --no-regression` in the foreground. Never write a task that
+asks for the regression sweep, the whole suite, enforced coverage or a background run: the dispatcher runs
+the regression after the build, and a build agent cannot wait for a long command.
+
 Follow the openspec-propose workflow:
 1. Run `openspec status --change {{change}} --json`, then for each artifact in dependency order run
    `openspec instructions <artifact-id> --change {{change}} --json` and write that artifact.

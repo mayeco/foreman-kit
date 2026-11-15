@@ -33,7 +33,7 @@ For each change listed under "Integrated changes":
 
 1. Read its archived `proposal.md` (`openspec/changes/archive/<date>-<change>/`) and every requirement it added or modified in `openspec/specs/<capability>/spec.md`, with all their scenarios.
 2. Read the child commits behind it: `git -C repos/<repo> show --stat <sha>`, then the relevant hunks. Find the test that asserts each scenario's THEN clause. A scenario without a test that asserts it is a finding.
-3. Run the gates of the touched repositories: `foreman-kit gates --repo <repo>`.
+3. Run the gates of the touched repositories without the regression, which the sweep below runs: `foreman-kit gates --repo <repo> --no-regression` (`--no-regression` leaves out the regression that `regression.when` would add; it cannot be combined with `--regression`).
 4. When a THEN clause must be compared with observed behavior (a status code, a response body, a stored value, a log line, a rendered element), reproduce the WHEN (in a disposable instance when it writes state; see the disposable-instance rule under "Rules"), preferably with the application's QA skills (`skills`). Save the output, then ask the evaluator whether it satisfies the clause:
    `jev noul "Does this output satisfy: <THEN clause>?" --true "<what satisfying looks like>" --false "<what not satisfying looks like>" --state-file <output> --model <model> --field noul`.
    Record the probability. "Cannot tell" is a finding for a human, never a pass.

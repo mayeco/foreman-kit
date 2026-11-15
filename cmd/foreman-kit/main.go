@@ -431,7 +431,7 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 
 	// 7. gates
 	gatesCmd := &cobra.Command{
-		Use:                "gates [--all] [--regression] [--base REF] [--repo NAME]",
+		Use:                "gates [--all] [--regression | --no-regression] [--base REF] [--repo NAME]",
 		Short:              "Run diff-aware quality gates across child repositories",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

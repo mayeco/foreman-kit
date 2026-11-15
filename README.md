@@ -310,7 +310,7 @@ cd web/portal && npm ci && npm run build   # writes internal/assets/portal_ui/{p
 | `foreman-kit dispatch [--dry-run]` | Plan and build queued backlog items across parallel isolated worktrees |
 | `foreman-kit merge [--batch \| --watch]` | Rebase, run gates, archive specs, and push ready changes to `origin` |
 | `foreman-kit cycle [--detach]` | Run one autonomous verification, exploration, proposal, and dispatch cycle |
-| `foreman-kit gates [--repo <name>]` | Run quality gates for changed or specified child repositories |
+| `foreman-kit gates [--repo <name>] [--no-regression]` | Run quality gates for changed or specified child repositories (`--no-regression` skips the regression that `regression.when` would add; the dispatcher still runs it after a build) |
 | `foreman-kit exec <repo> <cmd...>` | Execute a command inside `<repo>` with its `env_script` and slot environment |
 | `foreman-kit status` / `progress` | Show active locks, workers, queues, blocked items, and throughput metrics |
 | `foreman-kit proposals <list\|show\|approve\|reject\|review>` | Manage and review agent and roadmap proposals |

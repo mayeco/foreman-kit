@@ -18,4 +18,6 @@ Scope, checked after you exit:
 - Never commit, push, pull or switch branches; never start or stop the dispatcher or the merger.
 - Run any reproduction that writes state (a visual QA request, a backlog row, an execution, a commit, a push, an agent run) only in a disposable instance under `$TMPDIR` with its own `FOREMANKIT_STATE_DIR`, `FOREMANKIT_DB_PATH` and a portal port of its own (`foreman-kit portal --port <port>`), or in a `foreman-kit sim` stack (`foreman-kit sim init "$TMPDIR/<dir>"`), never against this application's own store, portal or remotes; read-only probes (`foreman-kit status`, `foreman-kit progress`, a portal `GET`) may use the real instance.
 
+Run every command in the foreground and keep it under 9 minutes; never leave one in the background and wait for it: this call runs unattended, and a call that only waits is stopped as idle.
+
 End with a five-line summary: the outcome on the first line, then anything that needs a human, then the report path.

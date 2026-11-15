@@ -80,14 +80,23 @@ func VerifyBaseForAccept(ctx context.Context, root string, st *store.Store, repo
 		}
 	}
 	_ = os.Remove(tmp)
+	// The cleanup forgets the two worktrees the check created, by path, and no other: never "git
+	// worktree prune", which deletes the administrative directory (with the git directories of its
+	// child repositories and the commits only they hold) of every worktree whose path cannot be reached
+	// right now, such as a person's on a volume that is not mounted. The child's worktree goes first:
+	// git refuses to remove a worktree that holds an initialized submodule.
 	cleanup := func() {
 		done, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 		defer cancel()
-		_, _ = gitx.RunGit(done, childDir, "worktree", "remove", "--force", filepath.Join(tmp, filepath.FromSlash(repo)))
-		_, _ = gitx.RunGit(done, root, "worktree", "remove", "--force", tmp)
-		_ = os.RemoveAll(tmp)
-		_, _ = gitx.RunGit(done, childDir, "worktree", "prune")
-		_, _ = gitx.RunGit(done, root, "worktree", "prune")
+		childWT := filepath.Join(tmp, filepath.FromSlash(repo))
+		_, err := gitx.RunGit(done, childDir, "worktree", "remove", "--force", childWT)
+		_ = os.RemoveAll(childWT)
+		if err != nil {
+			// git refuses a worktree whose .git it cannot read; once the directory is gone it drops the
+			// registration without reading it.
+			_, _ = gitx.RunGit(done, childDir, "worktree", "remove", "--force", childWT)
+		}
+		_ = umbrella.RemoveWorktree(done, tmp)
 	}
 	defer cleanup()
 	if _, err := gitx.RunGit(ctx, root, "worktree", "add", "--quiet", "--detach", tmp, baseRef); err != nil {

@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/mayeco/foreman-kit/internal/config"
 	"github.com/mayeco/foreman-kit/internal/settings"
 )
 
@@ -31,6 +32,10 @@ func TestAnErrorKeepsTheIdentifierItOpensWith(t *testing.T) {
 			map[string]any{"key": settings.QueueMaxOpen.Path(), "value": "0"}, http.StatusBadRequest, "invalid_input", settings.QueueMaxOpen.Path()},
 		{"a key that is not a setting", http.MethodPost, "/api/system/settings",
 			map[string]any{"key": "nope.x", "value": "1"}, http.StatusBadRequest, "invalid_input", "nope.x"},
+		{"a single-word key that is not a setting", http.MethodPost, "/api/system/settings",
+			map[string]any{"key": "probe", "value": "1"}, http.StatusBadRequest, "invalid_input", "probe is not a setting"},
+		{"a single-word key of a dry run", http.MethodPost, "/api/system/settings",
+			map[string]any{"key": "workers", "value": "1", "dry_run": true}, http.StatusBadRequest, "invalid_input", "workers is not a setting"},
 		{"a change that is already queued", http.MethodPost, "/api/backlog",
 			map[string]any{"change_name": "add-ui", "description": "Again"}, http.StatusConflict, "conflict", "add-ui"},
 		{"a single-word change that is already queued", http.MethodPost, "/api/backlog",
@@ -55,6 +60,23 @@ func TestAnErrorKeepsTheIdentifierItOpensWith(t *testing.T) {
 		}
 		if !strings.HasSuffix(msg, ".") {
 			t.Errorf("%s: the message %q does not end with a full stop", tc.why, msg)
+		}
+	}
+}
+
+// A refusal of config that opens with a word of its own still reads as a sentence, and one that
+// opens with the key keeps it as config wrote it.
+func TestARefusalOfConfigReadsAsASentenceUnlessItOpensWithTheKey(t *testing.T) {
+	for _, tc := range []struct {
+		refusal *config.Refusal
+		want    string
+	}{
+		{&config.Refusal{Reason: "probe is not a setting; foreman-kit config show lists them", OpensWithValue: true}, "probe is not a setting; foreman-kit config show lists them."},
+		{&config.Refusal{Reason: "cannot set pipeline.dispatch.workers in .foreman-kit/pipeline.yaml (x); edit it by hand"}, "Cannot set pipeline.dispatch.workers in .foreman-kit/pipeline.yaml (x); edit it by hand."},
+	} {
+		a := answerOf(refusalProblem(tc.refusal))
+		if a.status != http.StatusBadRequest || a.code != "invalid_input" || a.message != tc.want {
+			t.Errorf("answerOf(%+v) = %+v, want %q", tc.refusal, a, tc.want)
 		}
 	}
 }

@@ -2178,6 +2178,10 @@ var lineKeyValueRe = regexp.MustCompile(`^( *[^:#]+:[ \t]*)(.*?)([ \t]+#.*)?(\r?
 // Set is a failure to read or to write the file.
 type Refusal struct {
 	Reason string
+	// OpensWithValue says that the reason opens with a value the kit interpolated (the key, the
+	// file or the agents asked for), not with a word of its own: a caller that words the reason
+	// as a sentence must keep that first word as it is, even when it is only letters.
+	OpensWithValue bool
 }
 
 func (r *Refusal) Error() string { return r.Reason }
@@ -2185,6 +2189,11 @@ func (r *Refusal) Error() string { return r.Reason }
 // refused returns a Refusal that gives the reason.
 func refused(format string, args ...any) error {
 	return &Refusal{Reason: fmt.Sprintf(format, args...)}
+}
+
+// refusedValue returns a Refusal whose reason opens with a value the format interpolates.
+func refusedValue(format string, args ...any) error {
+	return &Refusal{Reason: fmt.Sprintf(format, args...), OpensWithValue: true}
 }
 
 // Settable reports whether `foreman-kit config set` changes s: it does when the key holds one
@@ -2204,10 +2213,10 @@ func Set(root, key, text string, dryRun bool, out io.Writer) error {
 	}
 	setting, ok := settings.Lookup(settings.Key(key))
 	if !ok {
-		return refused("%s is not a setting; foreman-kit config show lists them", key)
+		return refusedValue("%s is not a setting; foreman-kit config show lists them", key)
 	}
 	if !Settable(setting) {
-		return refused("%s is not one value: %s", key, setting.Change)
+		return refusedValue("%s is not one value: %s", key, setting.Change)
 	}
 
 	parts := strings.Split(key, ".")
@@ -2215,7 +2224,7 @@ func Set(root, key, text string, dryRun bool, out io.Writer) error {
 	relFile := setting.Key.FilePath()
 	fullPath := filepath.Join(root, filepath.FromSlash(relFile))
 	if !fileExists(fullPath) {
-		return refused("%s does not exist (foreman-kit update writes it)", relFile)
+		return refusedValue("%s does not exist (foreman-kit update writes it)", relFile)
 	}
 
 	rawBytes, err := os.ReadFile(fullPath)
@@ -2224,7 +2233,7 @@ func Set(root, key, text string, dryRun bool, out io.Writer) error {
 	}
 	var before map[string]any
 	if err := yaml.Unmarshal(rawBytes, &before); err != nil {
-		return refused("%s is not valid YAML (%v); fix it by hand", relFile, err)
+		return refusedValue("%s is not valid YAML (%v); fix it by hand", relFile, err)
 	}
 	if before == nil {
 		before = map[string]any{}
@@ -2232,7 +2241,8 @@ func Set(root, key, text string, dryRun bool, out io.Writer) error {
 
 	value, err := parseValueForSet(root, setting, text, before)
 	if err != nil {
-		return &Refusal{Reason: err.Error()}
+		// Every reason of parseValueForSet opens with the key or with agent names.
+		return &Refusal{Reason: err.Error(), OpensWithValue: true}
 	}
 
 	old := digMap(before, setting.Key.Parts()...)
@@ -2276,7 +2286,7 @@ func Set(root, key, text string, dryRun bool, out io.Writer) error {
 		}
 	}
 	if len(brought) > 0 {
-		return refused("%s = %s would make %s invalid: %s", key, formatConfigValue(value), relFile, strings.Join(brought, "; "))
+		return refusedValue("%s = %s would make %s invalid: %s", key, formatConfigValue(value), relFile, strings.Join(brought, "; "))
 	}
 
 	oldDisplay := "nothing (the key was missing)"

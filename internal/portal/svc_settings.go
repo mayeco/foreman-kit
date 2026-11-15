@@ -303,11 +303,18 @@ func (w *workspace) SetSetting(key, value string, dryRun bool) (string, error) {
 		// value is not one it accepts. Anything else is a failure to read or to write the file.
 		var refusal *config.Refusal
 		if errors.As(err, &refusal) {
-			return "", errInvalid("%s", refusal.Reason)
+			return "", refusalProblem(refusal)
 		}
 		return "", err
 	}
 	return strings.TrimSpace(out.String()), nil
+}
+
+// refusalProblem words a refusal of config as an invalid-input problem. A reason that opens with
+// the key or the file keeps its first word as config wrote it, even a single plain word such as
+// `probe`; one that opens with a word of its own still reads as a sentence.
+func refusalProblem(refusal *config.Refusal) error {
+	return &problem{kind: invalidProblem, message: refusal.Reason, keepFirst: refusal.OpensWithValue}
 }
 
 // Recommendations asks the kit which settings its records argue for changing over the stretch called

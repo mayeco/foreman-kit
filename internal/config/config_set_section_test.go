@@ -109,3 +109,33 @@ func TestSetInTextAddsTheSectionsAKeyLacks(t *testing.T) {
 		t.Errorf("got %q, %v", got, err)
 	}
 }
+
+// TestARefusalSaysWhetherItOpensWithAValue: a caller that words a refusal as a sentence must keep
+// the first word of a reason that opens with the key or the file, even a bare word such as `probe`,
+// and may capitalize one that opens with a word of the kit's own.
+func TestARefusalSaysWhetherItOpensWithAValue(t *testing.T) {
+	root, _ := setupTestUmbrella(t)
+	var out bytes.Buffer
+	for _, tc := range []struct{ key, value, opens string }{
+		{"probe", "1", "probe is not a setting"},
+		{"workers", "1", "workers is not a setting"},
+		{"agents", "claude", "agents is not a setting"},
+		{"pipeline.repository.protected_paths", "x", "pipeline.repository.protected_paths is not one value"},
+		{"pipeline.dispatch.workers", "0", "pipeline.dispatch.workers"},
+	} {
+		err := Set(root, tc.key, tc.value, true, &out)
+		var refusal *Refusal
+		if !errors.As(err, &refusal) {
+			t.Fatalf("Set(%q, %q) returned %v (%T), want a *Refusal", tc.key, tc.value, err, err)
+		}
+		if !refusal.OpensWithValue || !strings.HasPrefix(refusal.Reason, tc.opens) {
+			t.Errorf("Set(%q, %q) refused with %+v, want a reason that opens with %q and says so", tc.key, tc.value, refusal, tc.opens)
+		}
+	}
+	if r := refused("cannot set %s", "x").(*Refusal); r.OpensWithValue {
+		t.Errorf("a reason that opens with a word of its own says it opens with a value: %+v", r)
+	}
+	if r := refusedValue("%s is odd", "x").(*Refusal); !r.OpensWithValue || r.Reason != "x is odd" {
+		t.Errorf("refusedValue = %+v", r)
+	}
+}

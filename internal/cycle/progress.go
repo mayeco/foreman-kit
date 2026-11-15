@@ -355,6 +355,12 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 				fmt.Fprintf(out, "open_changes: %d (%s: %d)\n", q.Open, queueMaxOpenKey, q.MaxOpen)
 			}
 		}
+		if backlog, err := ReadJSONList(filepath.Join(root, filepath.FromSlash(BacklogFile))); err == nil {
+			all := backlogNames(backlog)
+			if done := len(all) - len(pendingBacklogNames(ctx, root, backlog)); done > 0 {
+				fmt.Fprintf(out, "backlog_integrated: %d (integrated on the base and not counted as open; they can be taken out of %s)\n", done, BacklogFile)
+			}
+		}
 		_ = VisualQAStatus(ctx, root, st, out)
 	}
 
@@ -632,10 +638,7 @@ func Progress(ctx context.Context, root string, st *store.Store, since time.Time
 
 	// Integrated changes via gitx
 	var integratedInPeriod []map[string]any
-	everIntegrated := make(map[string]bool)
-	for _, c := range ArchivedChanges(root) {
-		everIntegrated[c] = true
-	}
+	everIntegrated := integratedChanges(ctx, root)
 	if repo, err := gitx.Open(root); err == nil {
 		baseBranch := ResolveBaseBranch(root)
 		baseRef := "HEAD"
@@ -940,7 +943,7 @@ func Progress(ctx context.Context, root string, st *store.Store, since time.Time
 	// How full the queue is, as the next cycle will count it. open is null when it cannot be counted.
 	queue := queueState{MaxOpen: cycleSettings.Int(settings.QueueMaxOpen)}
 	queueSection := map[string]any{"max_open": queue.MaxOpen, "open": nil, "room": nil, "full": false}
-	if open, err := openChanges(ctx, st, backlog); err == nil {
+	if open, err := openChanges(ctx, st, root, backlog); err == nil {
 		queue.Open = open
 		queueSection["open"], queueSection["room"], queueSection["full"] = queue.Open, queue.Room(), queue.Full()
 	}

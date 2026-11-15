@@ -786,7 +786,7 @@ func ReviewProposals(ctx context.Context, root string, st *store.Store, judge *e
 	// counted, nothing holds a proposal back: that is what a review did before the queue had a cap.
 	queue := queueState{MaxOpen: cycleSettings.Int(settings.QueueMaxOpen)}
 	limited := true
-	if queue.Open, err = openChanges(ctx, st, backlog); err != nil {
+	if queue.Open, err = openChanges(ctx, st, root, backlog); err != nil {
 		fmt.Fprintf(out, "queue: the open changes cannot be counted (%v): approved proposals are not held to %s\n", err, queueMaxOpenKey)
 		limited = false
 	}

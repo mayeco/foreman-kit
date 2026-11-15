@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/mayeco/foreman-kit/internal/config"
+	"github.com/mayeco/foreman-kit/internal/gitx"
 	"github.com/mayeco/foreman-kit/internal/settings"
 	"github.com/mayeco/foreman-kit/internal/store"
 )
@@ -78,10 +80,66 @@ func backlogNames(items []map[string]any) []string {
 	return names
 }
 
-// openChanges counts the changes the pipeline has not finished with, backlog being the backlog as
-// its file lists it now (store.CountOpenChanges). Without a store only that file is known.
-func openChanges(ctx context.Context, st *store.Store, backlog []map[string]any) (int, error) {
+// integratedCache keeps the base part of integratedChanges per checkout and base commit: it walks
+// the base's whole history, and the daemon asks on its passes.
+var integratedCache = struct {
+	sync.Mutex
+	sha   map[string]string
+	names map[string]map[string]bool
+}{sha: map[string]string{}, names: map[string]map[string]bool{}}
+
+// integratedChanges returns the changes integrated on the base of the checkout at root: archived in
+// the checkout (ArchivedChanges) or on its base ref, or carried by an integration commit of that ref
+// (gitx.IntegratedOn, the dispatcher's definition). The progress report calls these backlog items
+// integrated, and the queue cap does not count them as open.
+func integratedChanges(ctx context.Context, root string) map[string]bool {
+	out := make(map[string]bool)
+	for _, c := range ArchivedChanges(root) {
+		out[c] = true
+	}
+	baseRef := resolveLocalBaseRef(ctx, root)
+	sha := ""
+	if shaOut, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", baseRef+"^{commit}"); err == nil {
+		sha = strings.TrimSpace(shaOut)
+	}
+	if sha == "" {
+		return out // no commit to read: only the checkout's archive is known
+	}
+	integratedCache.Lock()
+	onBase, cached := integratedCache.names[root], integratedCache.sha[root] == sha
+	integratedCache.Unlock()
+	if !cached {
+		onBase = gitx.IntegratedOn(ctx, root, baseRef)
+		integratedCache.Lock()
+		integratedCache.sha[root], integratedCache.names[root] = sha, onBase
+		integratedCache.Unlock()
+	}
+	for name := range onBase {
+		out[name] = true
+	}
+	return out
+}
+
+// pendingBacklogNames returns the change names the backlog lists, each once and in order, without
+// those integrated on the base of the checkout at root: the dispatcher skips them, so they are no
+// open work although the file still lists them.
+func pendingBacklogNames(ctx context.Context, root string, backlog []map[string]any) []string {
 	names := backlogNames(backlog)
+	integrated := integratedChanges(ctx, root)
+	pending := names[:0:0]
+	for _, name := range names {
+		if !integrated[name] {
+			pending = append(pending, name)
+		}
+	}
+	return pending
+}
+
+// openChanges counts the changes the pipeline has not finished with, backlog being the backlog of
+// the checkout at root as its file lists it now (store.CountOpenChanges). A backlog item integrated
+// on the base does not count (pendingBacklogNames). Without a store only that file is known.
+func openChanges(ctx context.Context, st *store.Store, root string, backlog []map[string]any) (int, error) {
+	names := pendingBacklogNames(ctx, root, backlog)
 	if st == nil {
 		return len(names), nil
 	}
@@ -96,7 +154,7 @@ func readQueue(ctx context.Context, r *settings.Reader, root string, st *store.S
 	if err != nil {
 		return q, err
 	}
-	q.Open, err = openChanges(ctx, st, backlog)
+	q.Open, err = openChanges(ctx, st, root, backlog)
 	return q, err
 }
 
@@ -149,7 +207,7 @@ func planQuota(ctx context.Context, wt string, st *store.Store, out io.Writer) c
 		for _, name := range backlogNames(backlog) {
 			before[name] = true
 		}
-		open, err = openChanges(ctx, st, backlog)
+		open, err = openChanges(ctx, st, wt, backlog)
 	}
 	if err != nil {
 		fmt.Fprintf(out, "queue: the open changes cannot be counted (%v): this cycle is not held to %s\n", err, queueMaxOpenKey)

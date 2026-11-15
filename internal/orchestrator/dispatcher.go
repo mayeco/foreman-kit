@@ -1798,33 +1798,9 @@ func (d *Dispatcher) computeArchivedOnBase(ctx context.Context) map[string]bool 
 }
 
 // archivedOnBaseRef returns the changes archived under openspec/changes/archive/ on baseRef or carried
-// by an integration commit in its history.
+// by an integration commit in its history (gitx.IntegratedOn, which the queue cap counts by too).
 func (d *Dispatcher) archivedOnBaseRef(ctx context.Context, baseRef string) map[string]bool {
-	out := make(map[string]bool)
-	if lsOut, err := gitx.RunGit(ctx, d.root, "ls-tree", "--name-only", baseRef, "openspec/changes/archive/"); err == nil {
-		datePrefixRe := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-`)
-		for _, line := range strings.Split(lsOut, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			base := filepath.Base(line)
-			name := datePrefixRe.ReplaceAllString(base, "")
-			if name != "" {
-				out[name] = true
-			}
-		}
-	}
-	if r, err := gitx.Open(d.root); err == nil {
-		if completed, err := r.CompletedSince("", baseRef); err == nil {
-			for _, c := range completed {
-				if c.ChangeName != "" {
-					out[c.ChangeName] = true
-				}
-			}
-		}
-	}
-	return out
+	return gitx.IntegratedOn(ctx, d.root, baseRef)
 }
 
 func (d *Dispatcher) resolveBaseRef(ctx context.Context, dir string) string {

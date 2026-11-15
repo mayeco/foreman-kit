@@ -43,6 +43,24 @@ const (
 	BlockAbandoned  = "abandoned"  // the change was abandoned
 )
 
+// BlockReasonCountersReset is the reason of the block recorded, already resolved, where a change's
+// counters start over while it has no open block. It is a marker, not something that stopped the
+// change: it is no movement and no block to the evidence. Earlier versions recorded the marker of a
+// change that only had rebuild requests with the reason legacyResetReason.
+const (
+	BlockReasonCountersReset = "counters_reset"
+	legacyResetReason        = "rebuild_requested"
+)
+
+// notResetMarker keeps the marker of a reset out of a count of blocks (b is the table's alias, or
+// empty).
+func notResetMarker(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return alias + "reason NOT IN ('" + BlockReasonCountersReset + "', '" + legacyResetReason + "')"
+}
+
 // A resolution that starts the change's counters over: what happened before it no longer counts
 // towards its retries or its rebuilds.
 func forgets(resolution string) bool {
@@ -623,14 +641,6 @@ func (s *Store) ResolveQuarantine(ctx context.Context, change string, r Quaranti
 			if err := s.resolveOpenBlockTx(ctx, tx, change, r.Resolution, r.By, now); err != nil {
 				return err
 			}
-		} else if last := st.last(); r.Forget && last != nil {
-			// Nothing is open to resolve, yet the counters must start over: the latest block is what
-			// they are counted from, so it is the one marked as the point they start over at.
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE change_blocks SET resolved_at = ?, resolution = ?, resolved_by = ? WHERE id = ?
-			`, now, r.Resolution, nullStr(r.By), last.id); err != nil {
-				return err
-			}
 		}
 		if err := s.consumeRequestsTx(ctx, tx, change, now); err != nil {
 			return err
@@ -642,13 +652,14 @@ func (s *Store) ResolveQuarantine(ctx context.Context, change string, r Quaranti
 				return err
 			}
 		}
-		if r.Forget && len(st.chain) == 0 && len(st.reqs) > 0 {
-			// Only rebuild requests count for this change: they are told apart from later ones by a
-			// block resolved after them, so one is recorded as resolved at once.
+		if r.Forget && st.open() == nil && (len(st.chain) > 0 || len(st.reqs) > 0) {
+			// Nothing was open to resolve, yet the counters must start over: the blocks and rebuild
+			// requests on record are closed facts that stay as they are. What they are counted
+			// from is a block resolved after them, so one is recorded as resolved at once.
 			_, err := tx.ExecContext(ctx, `
 				INSERT INTO change_blocks (change_name, reason, host, blocked_at, resolved_at, resolution, resolved_by)
-				VALUES (?, 'rebuild_requested', ?, ?, ?, ?, ?)
-			`, change, nullStr(s.host), now, now, r.Resolution, nullStr(r.By))
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+			`, change, BlockReasonCountersReset, nullStr(s.host), now, now, r.Resolution, nullStr(r.By))
 			return err
 		}
 		return nil

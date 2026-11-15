@@ -427,7 +427,7 @@ func (v *View) cycleEvidence(ctx context.Context, ev *SettingEvidence, lower, fr
 	}, `
 		SELECT finished_at FROM change_runs WHERE result = 'ready' AND finished_at >= ?1 AND finished_at < ?2
 		UNION ALL
-		SELECT blocked_at FROM change_blocks WHERE blocked_at >= ?1 AND blocked_at < ?2
+		SELECT blocked_at FROM change_blocks WHERE blocked_at >= ?1 AND blocked_at < ?2 AND `+notResetMarker("")+`
 		UNION ALL
 		SELECT finished_at FROM merge_attempts WHERE result = 'integrated' AND finished_at >= ?1 AND finished_at < ?2
 		ORDER BY 1

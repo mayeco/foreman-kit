@@ -224,7 +224,7 @@ func (v *View) Dashboard(ctx context.Context, recent int) (Dashboard, error) {
 			add(Outcome{Kind: OutcomeBlock, Block: &b}, ms)
 		}
 		return err
-	}, `SELECT `+blockRecordColumns+`, blocked_at FROM change_blocks WHERE blocked_at < ?
+	}, `SELECT `+blockRecordColumns+`, blocked_at FROM change_blocks WHERE blocked_at < ? AND `+notResetMarker("")+`
 	    ORDER BY blocked_at DESC, id DESC LIMIT ?`, int64(math.MaxInt64), recent)
 	if err != nil {
 		return now, err

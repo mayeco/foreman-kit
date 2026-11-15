@@ -42,7 +42,7 @@ func (s *Store) movementBetweenMS(ctx context.Context, from, to int64) (Movement
 			(SELECT COUNT(*) FROM change_runs
 			  WHERE result = 'ready' AND finished_at >= ?1 AND finished_at < ?2),
 			(SELECT COUNT(*) FROM change_blocks
-			  WHERE blocked_at >= ?1 AND blocked_at < ?2),
+			  WHERE blocked_at >= ?1 AND blocked_at < ?2 AND `+notResetMarker("")+`),
 			(SELECT COUNT(*) FROM merge_attempts
 			  WHERE result = 'integrated' AND finished_at >= ?1 AND finished_at < ?2)
 	`, from, to).Scan(&m.Built, &m.Blocked, &m.Integrated)

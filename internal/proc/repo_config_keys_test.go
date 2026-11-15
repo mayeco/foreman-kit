@@ -94,6 +94,14 @@ func TestRunGatesOfAWorktreeCutBeforeTheRename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(child, "repo.config.yaml"), []byte(formerRepoConfig), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A worktree carries the .gitmodules of the umbrella, which says what its children are.
+	modules, err := os.ReadFile(filepath.Join(root, ".gitmodules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".gitmodules"), modules, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	res, out := runGatesOf(t, worktree, st, false)
 	if res.ExitCode != 0 || !strings.Contains(out, "setup_of_main_ran\n") || !strings.Contains(out, "gate_of_main_ran\n") {
 		t.Fatalf("the worktree did not run the gates of the main checkout's file (exit %d):\n%s", res.ExitCode, out)

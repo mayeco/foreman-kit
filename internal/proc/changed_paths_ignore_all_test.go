@@ -38,7 +38,10 @@ func TestChangedPathsInUmbrellaListsAChildMarkedIgnoreAll(t *testing.T) {
 	gitIn(t, umbrella, "add", "--force", "--", "repos/app")
 	gitIn(t, umbrella, "commit", "--quiet", "-m", "umbrella: record app's second commit")
 
-	got := changedPathsInUmbrella(context.Background(), umbrella, before)
+	got, err := changedPathsInUmbrella(context.Background(), umbrella, before)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !slices.Contains(got, "repos/app") {
 		t.Fatalf("changedPathsInUmbrella since %s = %q, want repos/app: its gitlink was committed since", before, got)
 	}

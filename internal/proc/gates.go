@@ -569,7 +569,57 @@ func extractOrderedStringMap(doc *yaml.Node, path ...string) ([]string, map[stri
 	return order, outMap
 }
 
-func changedPathsInUmbrella(ctx context.Context, root, base string) []string {
+// commitResolves reports whether ref names a commit of the repository at dir.
+func commitResolves(ctx context.Context, dir, ref string) bool {
+	_, err := gitx.RunGit(ctx, dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
+// validateGateBase refuses a --base that is not a commit of the umbrella: the diff against it would
+// fail, and a failed diff must never read as "nothing changed". An empty base is HEAD.
+func validateGateBase(ctx context.Context, root, base string) error {
+	if base == "" {
+		return nil
+	}
+	if strings.HasPrefix(base, "-") || !commitResolves(ctx, root, base) {
+		return fmt.Errorf("--base %q is not a commit of this umbrella (git rev-parse --verify %s^{commit} fails)", base, base)
+	}
+	return nil
+}
+
+// resolveGateRepos maps each --repo value to the name of a child repository: the name itself
+// (backend) or its path (repos/backend), one trailing slash ignored, nothing else.
+func resolveGateRepos(requested, childPaths []string) ([]string, error) {
+	known := make([]string, 0, len(childPaths))
+	for _, p := range childPaths {
+		known = append(known, filepath.Base(p))
+	}
+	var out []string
+	for _, value := range requested {
+		v := strings.TrimSuffix(value, "/")
+		found := ""
+		for _, p := range childPaths {
+			if v == p || v == filepath.Base(p) {
+				found = filepath.Base(p)
+				break
+			}
+		}
+		if found == "" {
+			list := "none registered in .gitmodules"
+			if len(known) > 0 {
+				list = strings.Join(known, ", ")
+			}
+			return nil, fmt.Errorf("--repo %q names no child repository of this umbrella (known: %s)", value, list)
+		}
+		out = append(out, found)
+	}
+	return out, nil
+}
+
+// changedPathsInUmbrella lists what differs from base (HEAD when empty) and what the working tree
+// changed. A diff against a base that cannot be read is an error, never an empty list; only an
+// umbrella without a first commit has no HEAD to diff, and then the working tree is all there is.
+func changedPathsInUmbrella(ctx context.Context, root, base string) ([]string, error) {
 	if base == "" {
 		base = "HEAD"
 	}
@@ -587,7 +637,11 @@ func changedPathsInUmbrella(ctx context.Context, root, base string) []string {
 	// as in gitx.ChangedPaths, which reads the working tree's state below; --ignore-submodules=none: a
 	// child whose gitlink moved is listed even when .gitmodules says "ignore = all" for it, or the gates
 	// select no repository for a change that touched it.
-	if diffOut, err := gitx.RunGit(ctx, root, "diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=none", base, "--"); err == nil {
+	if base != "HEAD" || commitResolves(ctx, root, "HEAD") {
+		diffOut, err := gitx.RunGit(ctx, root, "diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=none", base, "--")
+		if err != nil {
+			return nil, fmt.Errorf("cannot diff the umbrella against %q: %v", base, err)
+		}
 		for _, p := range strings.Split(diffOut, "\x00") {
 			add(p)
 		}
@@ -598,10 +652,10 @@ func changedPathsInUmbrella(ctx context.Context, root, base string) []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
-func changedFilesInChildRepo(ctx context.Context, umbrellaRoot, childDir, repoName, base string) []string {
+func changedFilesInChildRepo(ctx context.Context, umbrellaRoot, childDir, repoName, base string) ([]string, error) {
 	if base == "" {
 		base = "HEAD"
 	}
@@ -629,10 +683,12 @@ func changedFilesInChildRepo(ctx context.Context, umbrellaRoot, childDir, repoNa
 	// output C-quotes non-ASCII names, which then match no glob); --no-renames: both sides of a rename,
 	// so a file moved out of a regression.when path still counts.
 	if childBase != "" {
-		if diffOut, err := gitx.RunGit(ctx, childDir, "diff", "--name-only", "-z", "--no-renames", childBase, "--"); err == nil {
-			for _, p := range strings.Split(diffOut, "\x00") {
-				add(p)
-			}
+		diffOut, err := gitx.RunGit(ctx, childDir, "diff", "--name-only", "-z", "--no-renames", childBase, "--")
+		if err != nil {
+			return nil, fmt.Errorf("cannot diff repos/%s against %s (the commit the base records for it): %v", repoName, childBase, err)
+		}
+		for _, p := range strings.Split(diffOut, "\x00") {
+			add(p)
 		}
 	}
 	if lsOut, err := gitx.RunGit(ctx, childDir, "ls-files", "-z", "--others", "--exclude-standard"); err == nil {
@@ -641,7 +697,7 @@ func changedFilesInChildRepo(ctx context.Context, umbrellaRoot, childDir, repoNa
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // RunGates executes diff-aware quality gates across the OpenSpec layer and child repositories.
@@ -675,15 +731,27 @@ func RunGates(ctx context.Context, opts GatesOptions) (*GatesResult, error) {
 		childPaths, _ = uRepo.ChildPaths()
 	}
 
-	changed := changedPathsInUmbrella(ctx, root, opts.Base)
+	// A selection the run cannot honor is refused before any gate runs: a pass that executed nothing
+	// reads as a verdict.
+	selected, err := resolveGateRepos(opts.Repos, childPaths)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateGateBase(ctx, root, opts.Base); err != nil {
+		return nil, err
+	}
+	changed, err := changedPathsInUmbrella(ctx, root, opts.Base)
+	if err != nil {
+		return nil, err
+	}
 
 	var repos []string
 	if opts.All {
 		for _, p := range childPaths {
 			repos = append(repos, filepath.Base(p))
 		}
-	} else if len(opts.Repos) > 0 {
-		repos = append(repos, opts.Repos...)
+	} else if len(selected) > 0 {
+		repos = append(repos, selected...)
 	} else {
 		for _, p := range childPaths {
 			for _, ch := range changed {
@@ -859,7 +927,12 @@ func RunGates(ctx context.Context, opts GatesOptions) (*GatesResult, error) {
 			failed = append(failed, name+":config")
 			continue
 		}
-		childChanged := changedFilesInChildRepo(ctx, root, dir, name, opts.Base)
+		childChanged, err := changedFilesInChildRepo(ctx, root, dir, name, opts.Base)
+		if err != nil {
+			fmt.Fprintf(stdout, "---- [FAIL] repos/%s: %v\n", name, err)
+			failed = append(failed, name+":diff")
+			continue
+		}
 		// OPENSPEC_CHANGED_FILES: the name a script written before the kit was called Foreman reads.
 		extraEnv := []string{"FOREMANKIT_CHANGED_FILES=" + strings.Join(childChanged, "\n"), "OPENSPEC_CHANGED_FILES=" + strings.Join(childChanged, "\n")}
 
@@ -926,7 +999,7 @@ func RunGates(ctx context.Context, opts GatesOptions) (*GatesResult, error) {
 	}, nil
 }
 
-// RunGatesCLI implements `foreman-kit gates [--all] [--regression] [--base <ref>] [--repo <name>]`.
+// RunGatesCLI implements `foreman-kit gates [--all] [--regression] [--base <ref>] [--repo <name|repos/name>]`.
 func RunGatesCLI(ctx context.Context, root string, st *store.Store, args []string, stdout, stderr io.Writer) int {
 	return RunGatesCLIWith(ctx, root, st, args, stdout, stderr, nil)
 }
@@ -968,7 +1041,7 @@ func RunGatesCLIWith(ctx context.Context, root string, st *store.Store, args []s
 			i++
 			opts.Repos = append(opts.Repos, args[i])
 		case "-h", "--help":
-			fmt.Fprintln(stdout, "Usage: foreman-kit gates [--all] [--regression] [--base <ref>] [--repo <name>]")
+			fmt.Fprintln(stdout, "Usage: foreman-kit gates [--all] [--regression] [--base <ref>] [--repo <name|repos/name>]")
 			return 0
 		default:
 			fmt.Fprintf(stderr, "run_gates: unknown argument %s\n", args[i])
@@ -976,7 +1049,11 @@ func RunGatesCLIWith(ctx context.Context, root string, st *store.Store, args []s
 		}
 	}
 
-	res, _ := RunGates(ctx, opts)
+	res, err := RunGates(ctx, opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "gates: %v\n", err)
+		return 2
+	}
 	if res != nil {
 		return res.ExitCode
 	}

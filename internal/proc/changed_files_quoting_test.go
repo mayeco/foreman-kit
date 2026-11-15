@@ -85,7 +85,10 @@ func TestChangedFilesInChildRepoUnquotesPathsAndKeepsRenameSources(t *testing.T)
 	gitIn(t, child, "commit", "-q", "-m", "change")
 	writeIn(t, child, "notas/café.txt", "untracked\n")
 
-	got := changedFilesInChildRepo(context.Background(), root, child, "core", "HEAD")
+	got, err := changedFilesInChildRepo(context.Background(), root, child, "core", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{"config/locales/es.yml", "lib/es.yml", "config/locales/año.yml", "notas/café.txt"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("changed files %q lack %q", got, want)
@@ -115,7 +118,10 @@ func TestChangedPathsInUmbrellaUnquotesPathsAndKeepsRenameSources(t *testing.T) 
 	gitIn(t, root, "add", "-A")
 	gitIn(t, root, "commit", "-q", "-m", "change")
 
-	got := changedPathsInUmbrella(context.Background(), root, base)
+	got, err := changedPathsInUmbrella(context.Background(), root, base)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{"openspec/changes/old-name/proposal.md", "docs/proposal.md", "docs/diseño.md"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("changed paths %q lack %q", got, want)

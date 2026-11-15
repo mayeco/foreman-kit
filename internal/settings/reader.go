@@ -409,6 +409,9 @@ type Problem struct {
 	// Choice says the values are each well written and only a person can mend them, by choosing
 	// another (a role that names an agent it cannot hold): rewriting the file changes nothing.
 	Choice bool
+	// Unknown says the file holds this key and the catalog does not know it, and it is no former key
+	// nor content of the file: a typo, whose value `foreman-kit update` cannot carry over.
+	Unknown bool
 }
 
 func (p Problem) String() string {
@@ -470,10 +473,10 @@ func (r *Reader) Problems(name string) []Problem {
 			continue
 		}
 		if holdsKnown(leaf, known) {
-			out = append(out, Problem{File: f.Path, Key: key, Text: fmt.Sprintf("%s: must be a section with its own keys (is %s)", key.Path(), Inline(dig(fd.data, key.Parts()...)))})
+			out = append(out, Problem{File: f.Path, Key: key, Text: fmt.Sprintf("%s: must be a section with its own keys (is %s)", key.Path(), Inline(dig(fd.data, key.Parts()...))), Unknown: true})
 			continue
 		}
-		out = append(out, Problem{File: f.Path, Key: key, Text: key.Path() + ": not a setting of this file (a typo?)"})
+		out = append(out, Problem{File: f.Path, Key: key, Text: key.Path() + ": not a setting of this file (a typo?)", Unknown: true})
 	}
 	if name == AgentCommands.File() {
 		out = append(out, detachedRoleProblems(f.Path, fd.data)...)

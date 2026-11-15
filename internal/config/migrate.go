@@ -281,6 +281,7 @@ func (c *configData) rewrite(f settings.File) ([]byte, []string, error) {
 		values[settings.AgentCommands] = commands
 		notes = append(notes, commandNotes...)
 	}
+	notes = append(notes, c.unknownKeyNotes(f, values)...)
 
 	text, err := RenderSeed(f.Name, values)
 	if err != nil {

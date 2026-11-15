@@ -486,12 +486,19 @@ func TestProblemsNameWhatAFileLacksAndWhatItShouldNotHold(t *testing.T) {
 	seed["dispatch"].(map[string]any)["wokers"] = 3
 
 	r := (&settings.Reader{FilesAlone: true}).Use("pipeline", seed)
-	var got []string
+	var got, unknown []string
 	for _, p := range r.Problems("pipeline") {
 		if p.File != ".foreman-kit/pipeline.yaml" {
 			t.Errorf("a problem of another file: %+v", p)
 		}
 		got = append(got, p.Text)
+		if p.Unknown {
+			unknown = append(unknown, string(p.Key))
+		}
+	}
+	// Only the key nothing ever read is a typo: a key of before, a missing one and an invalid one are not.
+	if asJSON(t, unknown) != asJSON(t, []string{"pipeline.dispatch.wokers"}) {
+		t.Errorf("problems flagged Unknown: %v", unknown)
 	}
 	sort.Strings(got)
 	want := []string{

@@ -207,7 +207,7 @@ func VerifyKitInstallation(root string, out io.Writer) bool {
 			lockAgents = append(lockAgents, fmt.Sprint(a))
 		}
 		if cfg := config.Load(root); cfg != nil && len(cfg.Agents) > 0 {
-			if strings.Join(cfg.Agents, ",") != strings.Join(lockAgents, ",") {
+			if strings.Join(config.SkillAgents(cfg.Agents), ",") != strings.Join(config.SkillAgents(lockAgents), ",") {
 				edited[".foreman-kit/agents.yaml"] = fmt.Sprintf("lists %s, skills installed for %s: run foreman-kit upgrade --agents ...",
 					strings.Join(cfg.Agents, ", "), strings.Join(lockAgents, ", "))
 			}

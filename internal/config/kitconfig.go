@@ -1702,7 +1702,7 @@ func CheckKitDrift(root string) string {
 		for _, a := range lockAgentsRaw {
 			lockAgents = append(lockAgents, fmt.Sprint(a))
 		}
-		if cfg := Load(root); cfg != nil && len(cfg.Agents) > 0 && !reflect.DeepEqual(cfg.Agents, lockAgents) {
+		if cfg := Load(root); cfg != nil && len(cfg.Agents) > 0 && !reflect.DeepEqual(SkillAgents(cfg.Agents), SkillAgents(lockAgents)) {
 			edited[".foreman-kit/agents.yaml"] = fmt.Sprintf("lists %s, skills installed for %s: run foreman-kit upgrade --agents ...", strings.Join(cfg.Agents, ", "), strings.Join(lockAgents, ", "))
 		}
 	}
@@ -1981,9 +1981,11 @@ func parseValueWith(r *settings.Reader, root string, setting settings.Setting, t
 		for _, a := range listed {
 			listedSet[a] = true
 		}
+		// Only an agent the kit ships needs its skills installed, so only it must be listed: one
+		// the file gives commands (checked above) runs as written wherever a role names it.
 		var stray []string
 		for _, a := range value.([]string) {
-			if !listedSet[a] {
+			if _, shipped := SUPPORTED[a]; shipped && !listedSet[a] {
 				stray = append(stray, a)
 			}
 		}

@@ -409,6 +409,19 @@ func IsKnownOrExecutableAgentInRoot(root, name string) bool {
 	return err == nil
 }
 
+// SkillAgents returns the agents of the list that the kit ships, in order: the only ones it installs
+// skills for. An agent written under commands: of .foreman-kit/agents.yaml has none to install, so
+// the check of what kit.lock records compares these alone.
+func SkillAgents(agents []string) []string {
+	var out []string
+	for _, a := range agents {
+		if _, shipped := SUPPORTED[a]; shipped {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // ParseAgents parses a comma-separated agent list (e.g. "hermes, opencode") into unique supported agent names.
 func ParseAgents(list string) ([]string, error) {
 	names := Names(list)

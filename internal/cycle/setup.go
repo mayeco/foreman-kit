@@ -162,6 +162,9 @@ type AgentsFileConfig struct {
 	ExtraArgs map[string][]string `json:"extra_args"`
 	// ExtraArgsByRole holds, per agent, the arguments each role gives it (roles.<role>.args).
 	ExtraArgsByRole map[string]map[string][]string `json:"extra_args_by_role,omitempty"`
+	// Custom holds the agents the file gives commands (commands.<agent>) that the kit does not ship:
+	// valid among the agents and in a role, with no skills to install.
+	Custom map[string]bool `json:"-"`
 }
 
 // LockFileEntry represents one file entry in .foreman-kit/kit.lock.
@@ -201,7 +204,9 @@ type SelfUpgradeOptions struct {
 }
 
 // ParseAgentsList parses a comma-separated list of agent names and validates against SupportedAgents.
-func ParseAgentsList(list string) ([]string, error) {
+// custom holds the agents the kit does not ship that .foreman-kit/agents.yaml gives commands: they
+// are valid names too.
+func ParseAgentsList(list string, custom map[string]bool) ([]string, error) {
 	var out []string
 	seen := make(map[string]bool)
 	for _, raw := range strings.Split(list, ",") {
@@ -209,7 +214,7 @@ func ParseAgentsList(list string) ([]string, error) {
 		if name == "" || seen[name] {
 			continue
 		}
-		if _, ok := SupportedAgents[name]; !ok {
+		if _, ok := SupportedAgents[name]; !ok && !custom[name] {
 			return nil, fmt.Errorf("unknown agent %s (supported: %s)", name, strings.Join(SupportedAgentOrder, ", "))
 		}
 		seen[name] = true
@@ -252,6 +257,7 @@ func LoadAgentsConfig(root string) AgentsFileConfig {
 		return res
 	}
 	res.Agents = append(res.Agents, cfg.Agents...)
+	res.Custom = customAgentsOf(cfg)
 	for role, list := range cfg.Roles {
 		res.Roles[role] = append([]string(nil), list...)
 	}
@@ -330,6 +336,17 @@ func WriteAgentsConfig(root string, agents []string, roles map[string][]string, 
 	return config.Write(root, agents, rolesCopy, selection)
 }
 
+// customAgentsOf returns the agents cfg gives commands that the kit does not ship.
+func customAgentsOf(cfg *config.AgentsConfig) map[string]bool {
+	custom := map[string]bool{}
+	for name := range cfg.Commands {
+		if _, shipped := SupportedAgents[name]; !shipped {
+			custom[name] = true
+		}
+	}
+	return custom
+}
+
 // resolveSelection returns the agents of an application and the agents of each role: what opts asks
 // for, over what cur, its .foreman-kit/agents.yaml, already says.
 func resolveSelection(cur AgentsFileConfig, opts KitOptions) ([]string, map[string][]string, error) {
@@ -340,7 +357,7 @@ func resolveSelection(cur AgentsFileConfig, opts KitOptions) ([]string, map[stri
 	if agentsStr == "" {
 		return nil, nil, fmt.Errorf("pass --agents with the agents this application uses (%s)", strings.Join(SupportedAgentOrder, ", "))
 	}
-	agents, err := ParseAgentsList(agentsStr)
+	agents, err := ParseAgentsList(agentsStr, cur.Custom)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -356,20 +373,24 @@ func resolveSelection(cur AgentsFileConfig, opts KitOptions) ([]string, map[stri
 			given = parseStringList(opts.Roles[role])
 		}
 		for _, g := range given {
-			if !agentSet[g] {
+			if !agentSet[g] && !cur.Custom[g] {
 				return nil, nil, fmt.Errorf("--%s %s is not one of the agents (%s)", role, g, strings.Join(agents, ", "))
 			}
 		}
+		// A custom agent is kept in a role whether or not agents: lists it: it has no skills that
+		// listing would install.
 		var kept []string
+		keptCustom := false
 		for _, k := range cur.Roles[role] {
-			if agentSet[k] {
+			if agentSet[k] || cur.Custom[k] {
 				kept = append(kept, k)
+				keptCustom = keptCustom || cur.Custom[k]
 			}
 		}
 		var chosen []string
 		if len(given) > 0 {
 			chosen = given
-		} else if len(kept) > 0 && len(agents) > 1 {
+		} else if len(kept) > 0 && (len(agents) > 1 || keptCustom) {
 			chosen = kept
 		} else {
 			chosen = []string{firstThatHoldsARole(agents)}
@@ -756,6 +777,7 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 	curAgentsCfg := AgentsFileConfig{Roles: map[string][]string{}}
 	if cfg := early.Agents(target); cfg != nil {
 		curAgentsCfg.Agents = cfg.Agents
+		curAgentsCfg.Custom = customAgentsOf(cfg)
 		for role, list := range cfg.Roles {
 			curAgentsCfg.Roles[role] = list
 		}
@@ -1178,7 +1200,7 @@ func Verify(target string, out io.Writer) (bool, error) {
 
 	edited := Drift(target, lock)
 	curAgents := LoadAgentsConfig(target).Agents
-	if len(lock.Agents) > 0 && len(curAgents) > 0 && !equalStringSlices(curAgents, lock.Agents) {
+	if len(lock.Agents) > 0 && len(curAgents) > 0 && !equalStringSlices(config.SkillAgents(curAgents), config.SkillAgents(lock.Agents)) {
 		edited[AgentsConfig] = fmt.Sprintf("lists %s, skills installed for %s: run foreman-kit upgrade --agents ...",
 			strings.Join(curAgents, ", "), strings.Join(lock.Agents, ", "))
 	}

@@ -3233,7 +3233,7 @@ func (d *Dispatcher) workerChildOnto(ctx context.Context, wt, baseRef string) ma
 // pointerRollback returns the rollback of child cp's gitlink at baseRef in the worktree wt
 // (gitx.FindPointerRollback), reported once as repo.pointer_rolled_back, or nil.
 func (d *Dispatcher) pointerRollback(ctx context.Context, wt, baseRef, cp string) *gitx.PointerRollback {
-	rb := gitx.FindPointerRollback(ctx, wt, baseRef, cp, 200)
+	rb := gitx.FindPointerRollback(ctx, wt, baseRef, d.cfg().Remote, cp, 200)
 	if rb == nil {
 		return nil
 	}

@@ -36,7 +36,7 @@ func TestAChangeBuildsOnTheGitlinkFromBeforeARollback(t *testing.T) {
 	mcfGit(t, mate, "push", "-q", "origin", "master")
 	rollback := mcfGit(t, mate, "rev-parse", "HEAD")
 
-	rb := gitx.FindPointerRollback(ctx, mate, "HEAD", "repos/core", 200)
+	rb := gitx.FindPointerRollback(ctx, mate, "HEAD", "origin", "repos/core", 200)
 	if rb == nil || rb.Commit != rollback || rb.From != integrated || rb.To != first || rb.Lost != 1 {
 		t.Fatalf("rollback = %+v, want %s moving %s back to %s, 1 commit lost", rb, rollback, integrated, first)
 	}
@@ -85,7 +85,7 @@ func TestAChangeBuildsOnTheGitlinkFromBeforeARollback(t *testing.T) {
 	if _, err := gitx.RunGit(ctx, core, "merge-base", "--is-ancestor", integrated, now); err != nil {
 		t.Fatalf("the merge did not record core forward past %s (now %s)", integrated, now)
 	}
-	if gitx.FindPointerRollback(ctx, sb.umbrella, "origin/master", "repos/core", 200) != nil {
+	if gitx.FindPointerRollback(ctx, sb.umbrella, "origin/master", "origin", "repos/core", 200) != nil {
 		t.Fatal("the rollback is still reported after the merge recorded core forward")
 	}
 }

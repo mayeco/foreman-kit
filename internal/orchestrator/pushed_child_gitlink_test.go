@@ -64,7 +64,7 @@ func TestMergerRetryAfterAChildPushNeverMovesTheGitlinkBack(t *testing.T) {
 	}
 	core := filepath.Join(sb.umbrella, "repos", "core")
 	mcfGit(t, core, "fetch", "--quiet", "origin")
-	if rb := gitx.FindPointerRollback(ctx, sb.umbrella, "origin/master", "repos/core", 200); rb != nil {
+	if rb := gitx.FindPointerRollback(ctx, sb.umbrella, "origin/master", "origin", "repos/core", 200); rb != nil {
 		t.Fatalf("the merge of add-a rolled core's gitlink back: %+v", rb)
 	}
 }

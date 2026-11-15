@@ -112,15 +112,14 @@ func TestFindPointerRollbackSeesGitlinksWhateverTheSubmoduleIgnoreSetting(t *tes
 	umbrella, child := subIgnoreUmbrella(t)
 	first := gitT(t, child, "rev-parse", "HEAD")
 
-	gitT(t, child, "commit", "--quiet", "--allow-empty", "-m", "app: second")
-	second := gitT(t, child, "rev-parse", "HEAD")
+	second := rollbackIntegrate(t, umbrella, child, "app: second")
 	subIgnoreRecord(t, umbrella, "umbrella: record app's second commit")
 
 	// A stale checkout of the child committed with the umbrella: the gitlink moves back.
 	gitT(t, child, "checkout", "--quiet", first)
 	rollback := subIgnoreRecord(t, umbrella, "umbrella: unrelated commit made with a stale child checkout")
 
-	rb := FindPointerRollback(ctx, umbrella, "HEAD", "repos/app", 200)
+	rb := FindPointerRollback(ctx, umbrella, "HEAD", "origin", "repos/app", 200)
 	if rb == nil || rb.Commit != rollback || rb.From != second || rb.To != first || rb.Lost != 1 {
 		t.Fatalf("rollback = %+v, want %s moving repos/app back from %s to %s (1 commit lost)", rb, rollback, second, first)
 	}

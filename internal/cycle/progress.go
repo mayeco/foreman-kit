@@ -457,12 +457,13 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 				}
 				fmt.Fprintf(out, "  %-22s %-24s %s dirty=%d\n", p, cbr, strings.TrimSpace(csha), dirtyLines)
 			}
-			baseRef := settings.RemoteName(root) + "/" + ResolveBaseBranch(root)
+			remote := settings.RemoteName(root)
+			baseRef := remote + "/" + ResolveBaseBranch(root)
 			if _, err := gitx.RunGit(ctx, root, "rev-parse", "--verify", "--quiet", baseRef); err != nil {
 				baseRef = "HEAD"
 			}
 			for _, p := range children {
-				if rb := gitx.FindPointerRollback(ctx, root, baseRef, p, 200); rb != nil {
+				if rb := gitx.FindPointerRollback(ctx, root, baseRef, remote, p, 200); rb != nil {
 					fmt.Fprintf(out, "  POINTER ROLLED BACK: %s: umbrella commit %.7s moved its gitlink back from %.7s to %.7s (%d integrated commit(s) missing; a stale submodule committed with git commit -a?). The next change there builds on %.7s and its merge records it again; to restore it now: git -C %s checkout %.7s && git add %s && git commit\n",
 						p, rb.Commit, rb.From, rb.To, rb.Lost, rb.From, p, rb.From, p)
 				}

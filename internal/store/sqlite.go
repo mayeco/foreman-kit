@@ -83,18 +83,47 @@ func OpenAt(dbPath, workspaceID, canonicalRoot string) (*Store, error) {
 	return s, err
 }
 
+// sqliteURI is the DSN that opens the database file at dbPath with the given query (pragmas and
+// driver options). SQLite parses a file: URI: a '?' or '#' in the path would end the file name and
+// '%XX' would be decoded, so those bytes (and spaces and control bytes) are percent-encoded. Every
+// sql.Open of a state database goes through it.
+func sqliteURI(dbPath, query string) string {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	if strings.HasPrefix(dbPath, "/") {
+		b.WriteString("file://")
+	} else {
+		b.WriteString("file:")
+	}
+	for i := 0; i < len(dbPath); i++ {
+		c := dbPath[i]
+		if c == '%' || c == '?' || c == '#' || c <= ' ' || c == 0x7f {
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&0x0f])
+			continue
+		}
+		b.WriteByte(c)
+	}
+	if query != "" {
+		b.WriteByte('?')
+		b.WriteString(query)
+	}
+	return b.String()
+}
+
 func openAt(dbPath, workspaceID, canonicalRoot string) (*Store, error) {
 	pragmas := "_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)&_pragma=cache_size(-64000)"
 	// Every transaction of the writer starts with BEGIN IMMEDIATE: one that reads and then writes
 	// never has to upgrade its lock, which another process's write in between would refuse.
-	writeDB, err := sql.Open("sqlite", fmt.Sprintf("file:%s?%s&_txlock=immediate", dbPath, pragmas))
+	writeDB, err := sql.Open("sqlite", sqliteURI(dbPath, pragmas+"&_txlock=immediate"))
 	if err != nil {
 		return nil, err
 	}
 	// Writer pool serialized to 1 connection to eliminate intra-process SQLITE_BUSY contention.
 	writeDB.SetMaxOpenConns(1)
 
-	readDB, err := sql.Open("sqlite", fmt.Sprintf("file:%s?%s", dbPath, pragmas))
+	readDB, err := sql.Open("sqlite", sqliteURI(dbPath, pragmas))
 	if err != nil {
 		_ = writeDB.Close()
 		return nil, err
@@ -354,7 +383,7 @@ func setAsideLegacyDB(dbPath string) error {
 	if !fileExists(dbPath) {
 		return nil
 	}
-	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_pragma=busy_timeout(15000)", dbPath))
+	db, err := sql.Open("sqlite", sqliteURI(dbPath, "_pragma=busy_timeout(15000)"))
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,7 @@
 
 {{ROADMAP_INTRO}}
 
-The scheduled cycle reads this file (`roadmap.file` in `.foreman-kit/cycle.yaml`) and proposes the next features it lists that are not built, queued or proposed yet. Proposals are approved as `proposals.approval` says: by the evaluator, by a person, or automatically. Keep the list in priority order, one feature per item, each with the outcome users get and how to tell it works.
+The scheduled cycle reads this file (`roadmap.file` in `.foreman-kit/cycle.yaml`) and proposes the next features it lists that are not built, queued or proposed yet. Proposals are approved as `proposals.approved_by` says: by the evaluator, by a person, or automatically. Keep the list in priority order, one feature per item, each with the outcome users get and how to tell it works.
 
 ## Next
 

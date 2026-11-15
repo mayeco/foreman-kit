@@ -328,15 +328,45 @@ func TestDetectGoWritesNoGuessedPort(t *testing.T) {
 	}
 }
 
-// TestDetectGoOnTheForemanRepository: the kit's own repository serves its portal on 4567
-// with the probe /healthz, and detection must say so.
+// TestDetectGoPortDefaultOutsideTheFlag: a Go CLI whose --port flag defaults to 0 and whose
+// usage text names a settings key instead of a number, with the real default 4567 only in a
+// settings catalog of another package, gets no port and no health endpoint, even though it
+// registers /healthz. This is the shape of the kit's own cmd/foreman-kit/main.go.
+func TestDetectGoPortDefaultOutsideTheFlag(t *testing.T) {
+	found := goWebRepo(t, map[string]string{
+		"cmd/app/main.go": `package main
+import (
+	"net/http"
+	"example.com/a/internal/settings"
+)
+func main() {
+	rootCmd.Flags().IntVar(&rootPort, "port", 0, "TCP port for the embedded web portal (default: "+settings.DaemonPort.Where()+")")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", h)
+	_ = http.Server{Handler: mux}
+}`,
+		"internal/settings/catalog.go": `package settings
+var catalog = []Setting{{Key: DaemonPort, Kind: KindInt, Min: 1, Max: PortMax, Default: 4567}}
+`,
+	})
+	if found.Port != "" || found.HealthEndpoint != "" {
+		t.Fatalf("port/health = %q/%q, want both empty", found.Port, found.HealthEndpoint)
+	}
+}
+
+// TestDetectGoOnTheForemanRepository: the kit's own repository is still detected as a Go web
+// repository with its dev command. Its port default lives in the settings catalog, so its port
+// is not asserted here (TestDetectGoPortDefaultOutsideTheFlag covers that shape).
 func TestDetectGoOnTheForemanRepository(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := DetectRepoStack(root)
-	if found.Port != "4567" || found.HealthEndpoint != "http://localhost:4567/healthz" {
-		t.Fatalf("port/health = %q/%q, want 4567 and http://localhost:4567/healthz", found.Port, found.HealthEndpoint)
+	if found.Stack != "go-web" || found.Kind != "web" || found.DevCommand != "go run ./cmd/foreman-kit" {
+		t.Fatalf("stack/kind/dev = %q/%q/%q, want go-web, web and go run ./cmd/foreman-kit", found.Stack, found.Kind, found.DevCommand)
+	}
+	if found.Port == "" && found.HealthEndpoint != "" {
+		t.Fatalf("health = %q without a detected port", found.HealthEndpoint)
 	}
 }

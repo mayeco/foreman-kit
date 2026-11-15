@@ -161,6 +161,14 @@ func TestHubCoalesces(t *testing.T) {
 	}
 }
 
+// The merger's fallback poll is far longer than the integration bound, so an integration inside the bound
+// can only come from the Hub signal; the wake-up itself is asserted within a short bound.
+const (
+	mergerFallbackFarAway  = 10 * time.Minute
+	mergerIntegrationBound = 60 * time.Second
+	mergerWakeBound        = 10 * time.Second
+)
+
 func TestMergerServeIntegratesImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -168,7 +176,7 @@ func TestMergerServeIntegratesImmediately(t *testing.T) {
 
 	hub := NewHub()
 	var log syncBuffer
-	merger, err := NewMerger(MergerOptions{Root: umbrellaDir, Store: st, Hub: hub, Out: &log})
+	merger, err := NewMerger(MergerOptions{Root: umbrellaDir, Store: st, Hub: hub, Out: &log, FallbackInterval: mergerFallbackFarAway})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,18 +189,21 @@ func TestMergerServeIntegratesImmediately(t *testing.T) {
 	const change = "serve-merge-now"
 	buildReadyManifest(t, ctx, umbrellaDir, st, change)
 
-	// Only the signal can wake the merger: its fallback is 30s.
+	// Only the signal can wake the merger: its fallback poll is far longer than this test.
 	signaled := time.Now()
 	hub.ReadyEnqueued()
-	if !waitUntil(3*time.Second, func() bool { return integratedOnOrigin(umbrellaDir, change) }) {
-		t.Fatalf("expected %s on origin/master within 3s of the ready signal; merger log:\n%s", change, log.String())
+	// The wake-up is logged before the drain starts, so it needs no integration time: a lost signal
+	// fails here, fast and by name.
+	if !waitUntil(mergerWakeBound, func() bool { return strings.Contains(log.String(), "merger: woke (ready)") }) {
+		t.Fatalf("expected the merger to wake from the ready signal within %s; merger log:\n%s", mergerWakeBound, log.String())
+	}
+	// An integration is git, gates and a push: it takes seconds on an idle machine and far longer under load.
+	if !waitUntil(mergerIntegrationBound, func() bool { return integratedOnOrigin(umbrellaDir, change) }) {
+		t.Fatalf("expected %s on origin/master within %s of the ready signal; merger log:\n%s", change, mergerIntegrationBound, log.String())
 	}
 	t.Logf("integrated %s after %s", change, time.Since(signaled).Round(time.Millisecond))
-	if !strings.Contains(log.String(), "merger: woke (ready)") {
-		t.Fatalf("expected the merger log to name its wake-up reason, got:\n%s", log.String())
-	}
 	// The merger removes the manifest after pushing and cleaning up the worker.
-	if !waitUntil(3*time.Second, func() bool { return !inReadyQueue(ctx, st, change) }) {
+	if !waitUntil(mergerIntegrationBound, func() bool { return !inReadyQueue(ctx, st, change) }) {
 		t.Fatalf("expected %s to leave the merge queue once integrated", change)
 	}
 

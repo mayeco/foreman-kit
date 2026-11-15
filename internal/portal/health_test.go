@@ -59,8 +59,9 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("HEAD /healthz Cache-Control = %q; want no-store", cc)
 	}
 
-	for _, method := range []string{http.MethodPost, http.MethodDelete} {
-		code, body, raw, hdr := doReq(t, mux, method, "/healthz", nil)
+	// Every method but GET and HEAD is refused through the portal's entry point, as a client meets it.
+	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodOptions, http.MethodPost, http.MethodDelete} {
+		code, body, raw, hdr := doReq(t, srv, method, "/healthz", nil)
 		if code != http.StatusMethodNotAllowed {
 			t.Errorf("%s /healthz = %d %s; want 405", method, code, raw)
 		}
@@ -72,6 +73,11 @@ func TestHealthEndpoint(t *testing.T) {
 		}
 		if errCode, errMsg := errorOf(body); errCode != "method_not_allowed" || errMsg == "" {
 			t.Errorf("%s /healthz error = (%q, %q) in %s; want method_not_allowed", method, errCode, errMsg, raw)
+		}
+	}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		if code, _, raw, _ := doReq(t, srv, method, "/healthz", nil); code != http.StatusOK {
+			t.Errorf("%s /healthz through the entry point = %d %s; want 200", method, code, raw)
 		}
 	}
 

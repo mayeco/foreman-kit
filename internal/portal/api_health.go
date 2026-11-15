@@ -27,10 +27,22 @@ func (s *Server) healthRoutes(mux *http.ServeMux) {
 			SchemaVersion: store.SchemaVersion(),
 		})
 	})
-	notAllowed := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Allow", "GET, HEAD")
-		fail(w, r, errMethod("%s takes GET or HEAD, not %s", r.URL.Path, r.Method))
-	}
-	mux.HandleFunc("POST /healthz", notAllowed)
-	mux.HandleFunc("DELETE /healthz", notAllowed)
+}
+
+// healthAddress is the address of the health probe.
+const healthAddress = "/healthz"
+
+// healthRefuses reports whether the health probe refuses method: it takes GET, and HEAD, which
+// follows GET. The methods it refuses are not listed in routes: any token is a valid method and a
+// method-less /healthz pattern would conflict with the GET-only pages, so Server.ServeHTTP asks
+// this before the mux, which would answer the rest with its plain-text 405 and an Allow header that
+// names every pattern of the address.
+func healthRefuses(method string) bool {
+	return method != http.MethodGet && method != http.MethodHead
+}
+
+// healthNotAllowed answers a method the health probe refuses: the API's JSON 405 with the methods it takes.
+func healthNotAllowed(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", "GET, HEAD")
+	fail(w, r, errMethod("%s takes GET or HEAD, not %s", r.URL.Path, r.Method))
 }

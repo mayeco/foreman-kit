@@ -425,6 +425,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !s.validatePageRequest(w, r) {
 			return
 		}
+		if path == healthAddress && healthRefuses(r.Method) {
+			healthNotAllowed(w, r)
+			return
+		}
 	}
 	s.router().ServeHTTP(w, r)
 }

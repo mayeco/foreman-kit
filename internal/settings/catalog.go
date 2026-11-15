@@ -94,11 +94,19 @@ func (k Key) Where() string {
 	return k.Path() + " in " + k.FilePath()
 }
 
+// PortMax is the highest TCP port: the Max of a setting that names a port, and the limit of every
+// --port option.
+const PortMax = 65535
+
+// PortOK reports whether n is a TCP port a process can listen on: a whole number from 1 to PortMax.
+func PortOK(n int) bool { return n >= 1 && n <= PortMax }
+
 // Kind is what a setting accepts.
 type Kind string
 
 const (
-	// KindInt is a whole number, Setting.Min or more (or "never" where Setting.Never allows it).
+	// KindInt is a whole number, Setting.Min or more and Setting.Max or less where it has one (or
+	// "never" where Setting.Never allows it).
 	KindInt Kind = "int"
 	// KindBool is true or false.
 	KindBool Kind = "bool"
@@ -140,6 +148,8 @@ type Setting struct {
 	Values []string
 	// Min is the least a KindInt accepts.
 	Min int
+	// Max is the most a KindInt accepts; 0 says no limit.
+	Max int
 	// Never says a KindDuration or a KindInt also accepts "never".
 	Never bool
 	// Zero says a KindDuration also accepts 0s: no wait at all.
@@ -688,7 +698,7 @@ func build() []Setting {
 			ReadBy: "foreman-kit -d -w, foreman-kit daemon",
 		},
 		Setting{
-			Key: DaemonPort, Kind: KindInt, Min: 1, Default: 4567,
+			Key: DaemonPort, Kind: KindInt, Min: 1, Max: PortMax, Default: 4567,
 			Means:  "the port the portal listens on; the next free one when it is taken, unless --port names one",
 			ReadBy: "foreman-kit -d -w, foreman-kit daemon",
 		},

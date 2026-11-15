@@ -581,7 +581,7 @@ func listenWhere(root string, stderr io.Writer) (port int, bind string) {
 	r := &settings.Reader{Root: root, Stderr: io.Discard}
 	port, bind = DefaultPort, DefaultBind
 	if d := r.Describe(settings.DaemonPort); d.InEffect != "" {
-		if p, err := strconv.Atoi(d.InEffect); err == nil && p > 0 {
+		if p, err := strconv.Atoi(d.InEffect); err == nil && settings.PortOK(p) {
 			port = p
 		}
 	} else {
@@ -663,7 +663,7 @@ func parsePortalArgs(args []string) (portalArgs, string) {
 		switch name {
 		case "-p", "--port":
 			p, err := strconv.Atoi(value)
-			if err != nil || p < 1 || p > 65535 {
+			if err != nil || !settings.PortOK(p) {
 				return a, fmt.Sprintf("portal: --port %s is not a port: give a whole number from 1 to 65535\n", shownValue(value))
 			}
 			a.port, a.portSet = p, true

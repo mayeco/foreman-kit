@@ -694,3 +694,30 @@ func TestUnusableSaysWhyAProcessStartsNoNewWork(t *testing.T) {
 		t.Errorf("a missing file:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// TestThePortalPortIsATCPPort: portal.port accepts a whole number from 1 to 65535 and says so; a
+// setting without a Max keeps its wording, and PortOK is the same range for a --port option.
+func TestThePortalPortIsATCPPort(t *testing.T) {
+	s := settings.Of(settings.DaemonPort)
+	for _, raw := range []any{70000, 65536, 0, -1, "99999", "abc"} {
+		if got := s.Problem(raw); got != "must be a whole number from 1 to 65535" {
+			t.Errorf("Problem(%#v) = %q", raw, got)
+		}
+	}
+	for raw, want := range map[any]int{1: 1, 4567: 4567, 65535: 65535, "65535": 65535} {
+		if got, ok := s.Parse(raw); !ok || got != want || s.Problem(raw) != "" {
+			t.Errorf("Parse(%#v) = %#v, %v; want %d", raw, got, ok, want)
+		}
+	}
+	for n, want := range map[int]bool{0: false, 1: true, 65535: true, 65536: false, 70000: false, -1: false} {
+		if settings.PortOK(n) != want {
+			t.Errorf("PortOK(%d) = %v, want %v", n, !want, want)
+		}
+	}
+	if got := settings.Of(settings.QueueMaxOpen).Expected(); got != "a whole number above 0" {
+		t.Errorf("a setting without a Max changed its wording: %q", got)
+	}
+	if def, _ := s.Default.(int); !settings.PortOK(def) {
+		t.Errorf("the port the kit ships, %d, is not a port", def)
+	}
+}

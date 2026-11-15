@@ -83,7 +83,7 @@ func (s Setting) Parse(raw any) (any, bool) {
 			return 0, true
 		}
 		n, ok := wholeNumber(raw)
-		if !ok || n < s.Min {
+		if !ok || n < s.Min || (s.Max > 0 && n > s.Max) {
 			return nil, false
 		}
 		return n, true
@@ -168,6 +168,8 @@ func (s Setting) Expected() string {
 	case KindInt:
 		var expected string
 		switch {
+		case s.Max > 0:
+			expected = fmt.Sprintf("a whole number from %d to %d", s.Min, s.Max)
 		case s.Min == 0:
 			expected = "a whole number, 0 or more"
 		case s.Min == 1:

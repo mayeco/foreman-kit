@@ -1032,8 +1032,8 @@ func RunDaemonCLI(ctx context.Context, root string, st *store.Store, baseOpts Da
 		case a == "--port" && i+1 < len(args):
 			i++
 			p, err := strconv.Atoi(args[i])
-			if err != nil || p <= 0 {
-				fmt.Fprintf(stderr, "daemon: invalid port %q\n", args[i])
+			if err != nil || !settings.PortOK(p) {
+				fmt.Fprintf(stderr, "daemon: --port %q is not a port: give a whole number from 1 to %d\n", args[i], settings.PortMax)
 				return 2
 			}
 			opts.Port = p
@@ -1041,8 +1041,8 @@ func RunDaemonCLI(ctx context.Context, root string, st *store.Store, baseOpts Da
 		case strings.HasPrefix(a, "--port="):
 			val := strings.TrimPrefix(a, "--port=")
 			p, err := strconv.Atoi(val)
-			if err != nil || p <= 0 {
-				fmt.Fprintf(stderr, "daemon: invalid port %q\n", val)
+			if err != nil || !settings.PortOK(p) {
+				fmt.Fprintf(stderr, "daemon: --port %q is not a port: give a whole number from 1 to %d\n", val, settings.PortMax)
 				return 2
 			}
 			opts.Port = p

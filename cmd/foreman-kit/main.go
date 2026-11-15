@@ -212,6 +212,12 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 	}
 
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		// A --port that is not a TCP port stops the command before it starts a daemon or a portal;
+		// --port 0 is a port given, not a port left out.
+		if cmd.Flags().Changed("port") && !settings.PortOK(rootPort) {
+			fmt.Fprintf(stderr, "foreman-kit: --port %d is not a port: give a whole number from 1 to %d\n", rootPort, settings.PortMax)
+			return wrapCode(2)
+		}
 		if rootDaemon {
 			root, st, err := openWorkspaceStore()
 			if err != nil {

@@ -177,3 +177,29 @@ func TestSetIsReadOnlyBeforeTheCommand(t *testing.T) {
 		}
 	}
 }
+
+// TestAPortOutsideTCPStopsTheRun: --set of portal.port above 65535, and --port of the root command
+// and of the daemon command outside 1 to 65535, exit 2 naming the range before anything starts.
+func TestAPortOutsideTCPStopsTheRun(t *testing.T) {
+	root := t.TempDir()
+	settingstest.WriteFiles(t, root, nil)
+	t.Setenv("FOREMANKIT_APP_ROOT", root)
+	t.Setenv(settings.RunOverridesEnv, "")
+	for _, args := range [][]string{
+		{"--set", "daemon.portal.port=70000", "config", "show", "daemon"},
+		{"--set", "daemon.portal.port=99999", "settings", "get", "portal.port"},
+		{"-w", "--port", "70000"},
+		{"-d", "-w", "--port", "70000"},
+		{"-w", "--port", "0"},
+		{"--port", "65536"},
+		{"daemon", "start", "--port", "70000"},
+		{"daemon", "start", "--port=0"},
+	} {
+		t.Setenv(settings.RunOverridesEnv, "")
+		var out, errOut bytes.Buffer
+		code := Run(context.Background(), args, &out, &errOut)
+		if code != 2 || !strings.Contains(errOut.String(), "1 to 65535") || strings.Contains(out.String()+errOut.String(), "listening on") {
+			t.Errorf("%v: exit %d, out %q, err %q", args, code, out.String(), errOut.String())
+		}
+	}
+}

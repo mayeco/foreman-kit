@@ -193,3 +193,20 @@ func TestStatusSaysWhenAConfigurationFileKeepsWorkFromStarting(t *testing.T) {
 		t.Fatalf("status on a .foreman-kit/agents.yaml that lacks a key:\n%s", out.String())
 	}
 }
+
+// TestTheDaemonCommandRefusesAPortOutsideTCP: `daemon --port` takes a whole number from 1 to 65535
+// and exits 2 naming the range, before it starts or stops anything.
+func TestTheDaemonCommandRefusesAPortOutsideTCP(t *testing.T) {
+	for _, args := range [][]string{
+		{"start", "--port", "70000"},
+		{"start", "--port=65536"},
+		{"run", "--port", "0"},
+		{"start", "--port=abc"},
+	} {
+		var out, errOut bytes.Buffer
+		rc := RunDaemonCLI(context.Background(), t.TempDir(), nil, DaemonOptions{}, args, &out, &errOut)
+		if rc != 2 || !strings.Contains(errOut.String(), "from 1 to 65535") || out.Len() != 0 {
+			t.Errorf("%v: rc %d, stdout %q, stderr %q", args, rc, out.String(), errOut.String())
+		}
+	}
+}

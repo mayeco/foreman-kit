@@ -13,35 +13,169 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-git/go-billy/v5"
+	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/storer"
+	"github.com/go-git/go-git/v5/storage/filesystem"
+	"github.com/go-git/go-git/v5/storage/filesystem/dotgit"
 	"gopkg.in/yaml.v3"
 )
 
-// Repo wraps a go-git repository opened with EnableDotGitCommonDir: true.
+// Repo wraps a go-git repository whose storage follows the git directory's commondir.
 type Repo struct {
 	dir  string
 	repo *git.Repository
 }
 
-// Open opens a repository or worktree (.worktrees/*) using go-git with EnableDotGitCommonDir: true.
+// Open opens the repository that holds dir: a main checkout, a linked worktree (.worktrees/*)
+// or a submodule checkout. It finds the .git directory or gitfile walking up from dir and
+// follows commondir, as go-git's PlainOpenWithOptions does with DetectDotGit and
+// EnableDotGitCommonDir. Unlike it, it opens repositories that set extensions.worktreeConfig,
+// which go-git v5 refuses although it reads them correctly; every other extension go-git does
+// not support still fails with go-git's own error. No configuration file is written.
 func Open(dir string) (*Repo, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	r, err := git.PlainOpenWithOptions(abs, &git.PlainOpenOptions{
-		DetectDotGit:          true,
-		EnableDotGitCommonDir: true,
-	})
+	dot, wt, err := findDotGit(abs)
 	if err != nil {
 		return nil, err
 	}
+	if _, err := dot.Stat(""); err != nil {
+		if os.IsNotExist(err) {
+			return nil, git.ErrRepositoryNotExists
+		}
+		return nil, err
+	}
+	common, err := commonDotGit(dot)
+	if err != nil {
+		return nil, err
+	}
+	storage := filesystem.NewStorage(dotgit.NewRepositoryFilesystem(dot, common), cache.NewObjectLRUDefault())
+	r, err := git.Open(worktreeConfigTolerantStorage{storage}, wt)
+	if err != nil {
+		return nil, err
+	}
+	// The wrapper only serves go-git's extension check. Reads and writes after it go through the
+	// plain storage, so the configuration keeps extensions.worktreeConfig in memory and on disk.
+	r.Storer = storage
 	return &Repo{dir: abs, repo: r}, nil
+}
+
+// findDotGit walks up from the absolute path abs (from its directory when abs is a file) to the
+// first .git entry. It returns the git directory and the worktree that holds the .git entry.
+// A .git directory is the git directory; a .git file names it with "gitdir: <path>". When no
+// .git exists up to the root, the root is returned as the git directory and git.Open reports
+// git.ErrRepositoryNotExists, as go-git's PlainOpenWithOptions does.
+func findDotGit(abs string) (dot, wt billy.Filesystem, err error) {
+	path := abs
+	if fi, statErr := os.Stat(path); statErr == nil && !fi.IsDir() {
+		path = filepath.Dir(path)
+	}
+	for {
+		fi, statErr := os.Stat(filepath.Join(path, git.GitDirName))
+		if statErr == nil {
+			wt = osfs.New(path)
+			if fi.IsDir() {
+				dot, err = wt.Chroot(git.GitDirName)
+				return dot, wt, err
+			}
+			dot, err = gitdirFromFile(path)
+			if err != nil {
+				return nil, nil, err
+			}
+			return dot, wt, nil
+		}
+		if !os.IsNotExist(statErr) {
+			return nil, nil, statErr
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return osfs.New(path), nil, nil
+		}
+		path = parent
+	}
+}
+
+// gitdirFromFile reads the gitfile dir/.git ("gitdir: <path>", as git writes it for a linked
+// worktree or a submodule checkout) and returns the git directory it names, relative to dir
+// unless absolute.
+func gitdirFromFile(dir string) (billy.Filesystem, error) {
+	b, err := os.ReadFile(filepath.Join(dir, git.GitDirName))
+	if err != nil {
+		return nil, err
+	}
+	const prefix = "gitdir: "
+	line := string(b)
+	if !strings.HasPrefix(line, prefix) {
+		return nil, fmt.Errorf(".git file has no %s prefix", prefix)
+	}
+	gitdir := strings.TrimSpace(strings.Split(line[len(prefix):], "\n")[0])
+	if filepath.IsAbs(gitdir) {
+		return osfs.New(gitdir), nil
+	}
+	return osfs.New(filepath.Join(dir, gitdir)), nil
+}
+
+// commonDotGit returns the common git directory named by the commondir file of a linked
+// worktree's git directory, or nil when dot has no commondir or it is empty. A commondir that
+// names a missing directory returns git.ErrRepositoryIncomplete.
+func commonDotGit(dot billy.Filesystem) (billy.Filesystem, error) {
+	b, err := os.ReadFile(filepath.Join(dot.Root(), "commondir"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(b) == 0 {
+		return nil, nil
+	}
+	path := strings.TrimSpace(string(b))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dot.Root(), path)
+	}
+	common := osfs.New(path)
+	if _, err := common.Stat(""); err != nil {
+		if os.IsNotExist(err) {
+			return nil, git.ErrRepositoryIncomplete
+		}
+		return nil, err
+	}
+	return common, nil
+}
+
+// worktreeConfigTolerantStorage hides extensions.worktreeConfig from the configuration it
+// returns, so that go-git's extension check in git.Open accepts the repository. go-git v5
+// compares the lowercased key with "worktreeConfig" under format version 0 and has no such
+// built-in extension under version 1, so it refuses the repository although it reads its
+// objects and refs correctly (it ignores config.worktree). The embedded storage decodes the
+// configuration anew on each call, so trimming the returned copy changes nothing shared or
+// on disk. Open uses it only for git.Open.
+type worktreeConfigTolerantStorage struct {
+	*filesystem.Storage
+}
+
+// Config returns the repository configuration without any extensions option whose key is
+// worktreeConfig in any letter case, whatever its value.
+func (s worktreeConfigTolerantStorage) Config() (*config.Config, error) {
+	cfg, err := s.Storage.Config()
+	if err != nil || cfg == nil || cfg.Raw == nil {
+		return cfg, err
+	}
+	for _, section := range cfg.Raw.Sections {
+		if section.IsName("extensions") {
+			section.RemoveOption("worktreeConfig")
+		}
+	}
+	return cfg, nil
 }
 
 func (r *Repo) Dir() string          { return r.dir }

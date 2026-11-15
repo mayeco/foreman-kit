@@ -3,6 +3,7 @@ module github.com/mayeco/foreman-kit
 go 1.27.4
 
 require (
+	github.com/go-git/go-billy/v5 v5.9.2
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/joho/godotenv v1.5.1
@@ -26,7 +27,6 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.16 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.9.2 // indirect
 	github.com/go-playground/locales v0.14.2 // indirect
 	github.com/go-playground/universal-translator v0.18.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect

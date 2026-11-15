@@ -444,6 +444,13 @@ func RunCyclePromptCLI(ctx context.Context, root string, args []string, stdout, 
 // writeCyclePrompt picks the exploration strategy of a cycle, renders its judgment prompt with the
 // plan given and writes it to outPath. It says on stdout which strategy it picked.
 func writeCyclePrompt(root, outPath string, plan cyclePlan, stdout, stderr io.Writer) int {
+	return writeCyclePromptPicked(root, outPath, plan, stdout, stderr, nil)
+}
+
+// writeCyclePromptPicked is writeCyclePrompt that also says, in picked when it is not nil, the slug
+// of the strategy it picked ("none" when every strategy needs a browser): what a cycle records as its
+// strategy, instead of what its log says.
+func writeCyclePromptPicked(root, outPath string, plan cyclePlan, stdout, stderr io.Writer, picked *string) int {
 	strategies := SessionStrategies(LoadExplorationStrategies(root), settings.SessionCycle)
 	stateFile := store.RuntimePath(root, "cycle", "strategy_state.json")
 	chosen, err := PickExplorationStrategy(strategies, LoadExplorationSelection(root), plan.Strategy, stateFile)
@@ -470,11 +477,28 @@ func writeCyclePrompt(root, outPath string, plan cyclePlan, stdout, stderr io.Wr
 			k = "defects"
 		}
 		fmt.Fprintf(stdout, "strategy: %s (%s)\n", chosen.Slug, k)
+		if picked != nil {
+			*picked = chosen.Slug
+		}
 	} else {
 		fmt.Fprintln(stdout, "strategy: none (all need a browser)")
+		if picked != nil {
+			*picked = "none"
+		}
 	}
 	return 0
 }
+
+// How a cycle ends, as its row records it. RunCycle says which from what it did; SummarizeCycleLog
+// words the same for a log that has no row.
+const (
+	CycleOutcomeDone            = "done"
+	CycleOutcomeDispatchRunning = "judged; an earlier dispatch was still running"
+	CycleOutcomePreflightFailed = "preflight failed"
+	CycleOutcomeScopeViolation  = "scope violation"
+	CycleOutcomePaused          = "paused"
+	CycleOutcomeStopped         = "stopped before the end"
+)
 
 // CycleOptions configures RunCycle and provides callback hooks for external orchestrator/proc actions.
 type CycleOptions struct {
@@ -660,35 +684,45 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	}
 
 	finished := false
-	finishExec := func(status string, code int) {
+	// What the cycle did, known to it and not read from its log, which the judgment writes to as
+	// well: the strategy it picked and the engine it ran.
+	var pickedStrategy, judgeRan string
+	finishExec := func(status string, code int, outcome string) {
 		finished = true
 		if st != nil {
 			_ = st.FinishExecution(context.Background(), execID, status, code)
-			sum := SummarizeCycleLog(stamp, lw.buf.String(), 0)
 			// The cycle's own row says what it was and how it ended: the latest finished one is the
 			// workspace's last cycle.
 			reportPath := findCycleReport(filepath.Join(cycleDir, "reports"), stamp, cycleBegan)
-			// The log names the judge as it ran it; only a plain engine name is recorded as one.
-			judge := asString(sum["judge"])
-			if strings.ContainsAny(judge, " \t/") {
+			// Only a plain engine name is recorded as the judge.
+			judge := judgeRan
+			if len(strings.Fields(judge)) > 1 || strings.Contains(judge, "/") {
 				judge = ""
 			}
 			_ = st.UpdateCycle(context.Background(), store.Cycle{
 				Stamp:         stamp,
-				Strategy:      asString(sum["strategy"]),
+				Strategy:      pickedStrategy,
 				JudgeEngine:   judge,
 				ReportPath:    reportPath,
 				FindingsCount: -1,
 			})
-			_ = st.FinishCycle(context.Background(), stamp, asString(sum["outcome"]), "")
+			_ = st.FinishCycle(context.Background(), stamp, outcome, "")
 		}
+	}
+	// scopeOutcome is how a cycle that ends on err is recorded: a scope violation says so, any
+	// other error is a cycle that stopped before the end.
+	scopeOutcome := func(err error) string {
+		if errors.Is(err, ErrScopeViolation) {
+			return CycleOutcomeScopeViolation
+		}
+		return CycleOutcomeStopped
 	}
 	// Every return below records the outcome first; only a panic unwinds past them. The daemon contains
 	// it and keeps running, so without this the execution would stay "running" under the daemon's live
 	// PID for as long as the daemon runs.
 	defer func() {
 		if !finished {
-			finishExec("failed", 1)
+			finishExec("failed", 1, CycleOutcomeStopped)
 		}
 	}()
 
@@ -714,7 +748,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	if opts.PreflightFunc != nil {
 		if err := opts.PreflightFunc(ctx, root, lw); err != nil {
 			fmt.Fprintln(lw, "preflight: FAIL")
-			finishExec("failed", 1)
+			finishExec("failed", 1, CycleOutcomePreflightFailed)
 			return err
 		}
 	} else {
@@ -773,7 +807,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 			return nil
 		})
 		if err != nil {
-			finishExec("failed", 1)
+			finishExec("failed", 1, scopeOutcome(err))
 			return err
 		}
 	}
@@ -805,8 +839,8 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	// What the last day of records argues for changing in the settings goes into the log and to
 	// the judgment, which passes it on in its report. Nothing is changed.
 	plan.Recommended = recommendForCycle(ctx, cycleWT, st, lw)
-	if rc := writeCyclePrompt(cycleWT, promptFile, plan, lw, lw); rc != 0 {
-		finishExec("failed", rc)
+	if rc := writeCyclePromptPicked(cycleWT, promptFile, plan, lw, lw, &pickedStrategy); rc != 0 {
+		finishExec("failed", rc, CycleOutcomeStopped)
 		return fmt.Errorf("cycle_prompt failed with code %d", rc)
 	}
 
@@ -815,6 +849,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 		engineLabel = "no agent: " + settings.RoleAgents("cycle").Where() + " lists none"
 	}
 	fmt.Fprintf(lw, "== judgment (%s)\n", engineLabel)
+	judgeRan = engineCycle
 	// The judgment's hard limit is its own key: nothing is added to the budget it was told.
 	judgmentTimeout := settings.Duration(cycleWT, settings.RoleTimeout("cycle"))
 	if opts.AgentExecFunc != nil {
@@ -826,7 +861,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	fmt.Fprintln(lw, "== scope guard")
 	if dirExists(filepath.Join(cycleWT, ".git")) || fileExists(filepath.Join(cycleWT, ".git")) {
 		if err := ScopeGuard(ctx, cycleWT, "cycle "+stamp, st, lw); err != nil {
-			finishExec("failed", 1)
+			finishExec("failed", 1, scopeOutcome(err))
 			return err
 		}
 	}
@@ -882,13 +917,13 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 	if st != nil {
 		if ws, err := st.GetWorkspaceState(ctx); err == nil && ws.Paused {
 			fmt.Fprintln(lw, "cycle: paused by agent or operator")
-			finishExec("succeeded", 0)
+			finishExec("succeeded", 0, CycleOutcomePaused)
 			return nil
 		}
 	}
 	if fileExists(store.RuntimePath(root, "PAUSE")) {
 		fmt.Fprintln(lw, "cycle: paused by agent or operator")
-		finishExec("succeeded", 0)
+		finishExec("succeeded", 0, CycleOutcomePaused)
 		return nil
 	}
 
@@ -898,7 +933,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 			opts.Notify()
 		}
 		fmt.Fprintln(lw, "== done")
-		finishExec("succeeded", 0)
+		finishExec("succeeded", 0, CycleOutcomeDone)
 		return nil
 	}
 
@@ -913,7 +948,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 		if errors.Is(err, store.ErrLockHeld) {
 			fmt.Fprintf(lw, "dispatch: already running (pid %s); it picks up what this cycle queued when a worker is free\n", dispatchRunningPID)
 			fmt.Fprintln(lw, "== done")
-			finishExec("succeeded", 0)
+			finishExec("succeeded", 0, CycleOutcomeDispatchRunning)
 			return nil
 		}
 		defer func() {
@@ -926,7 +961,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 				fmt.Fprintf(lw, "dispatch: a dispatcher started by hand is running (pid %d); not starting another\n", dl.PID)
 			}
 			fmt.Fprintln(lw, "== done")
-			finishExec("succeeded", 0)
+			finishExec("succeeded", 0, CycleOutcomeDone)
 			return nil
 		}
 	}
@@ -935,7 +970,7 @@ func RunCycle(ctx context.Context, root string, st *store.Store, opts CycleOptio
 		_ = opts.DispatchFunc(ctx, root, lw)
 	}
 	fmt.Fprintln(lw, "== done")
-	finishExec("succeeded", 0)
+	finishExec("succeeded", 0, CycleOutcomeDone)
 	return nil
 }
 

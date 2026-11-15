@@ -1700,8 +1700,11 @@ func ScopeGuard(ctx context.Context, dir, who string, st *store.Store, out io.Wr
 	if st == nil {
 		_ = os.WriteFile(store.RuntimePath(dir, "PAUSE"), []byte(reason+"\n"), 0o644)
 	}
-	return fmt.Errorf("%s: wrote outside scope: %s", who, outsideText)
+	return fmt.Errorf("%s: %w: %s", who, ErrScopeViolation, outsideText)
 }
+
+// ErrScopeViolation is what ScopeGuard returns, wrapped, when an agent wrote outside its scope.
+var ErrScopeViolation = errors.New("wrote outside scope")
 
 // recordLockWait is how long a command waits for the lock of the records before it gives up, when
 // its caller names no other limit. Nobody has a reason to change it: it is not a setting.

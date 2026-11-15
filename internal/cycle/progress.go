@@ -465,6 +465,24 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 	return nil
 }
 
+// recordedCycleOverLog sets in sum, a summary read from the log of the cycle stamp, what the cycle
+// recorded as its own when it has finished: its outcome, strategy and judge. The log holds what the
+// judgment wrote as well, so it only speaks for a cycle with no finished record.
+func recordedCycleOverLog(ctx context.Context, st *store.Store, stamp string, sum map[string]any) {
+	c, err := st.GetCycle(ctx, stamp)
+	if err != nil || c == nil || c.FinishedAt == "" || c.Outcome == "" || c.Outcome == "running" {
+		return
+	}
+	sum["outcome"] = c.Outcome
+	sum["strategy"] = nil
+	if c.Strategy != "" {
+		sum["strategy"] = c.Strategy
+	}
+	if c.JudgeEngine != "" {
+		sum["judge"] = c.JudgeEngine
+	}
+}
+
 // SummarizeCycleLog extracts a structured summary from a cycle log text or execution.
 func SummarizeCycleLog(stamp, text string, runningPID int) map[string]any {
 	var outcome string
@@ -662,6 +680,7 @@ func Progress(ctx context.Context, root string, st *store.Store, since time.Time
 			if ex.Agent != "" && sum["judge"] == nil {
 				sum["judge"] = ex.Agent
 			}
+			recordedCycleOverLog(ctx, st, stamp, sum)
 			lastCycleSummary = sum
 			if t, err := time.Parse(time.RFC3339, asString(sum["at"])); err == nil && !t.Before(since) {
 				cyclesInPeriod = append(cyclesInPeriod, sum)

@@ -364,6 +364,24 @@ func WriteAgentsYAML(root string, agents []string, roles map[string][]string, se
 	}
 }
 
+// AllScenarios are the scenarios of `sim run all`, in the order they run.
+var AllScenarios = []string{
+	"happy-path",
+	"quota-continuation",
+	"plan-build-repairs",
+	"rebase-conflict-rebuild",
+	"guardrails-quarantine",
+	"auto-retry-quarantine",
+	"autonomous-cycle",
+	"merger-idempotent-push-and-stale-heal",
+	"native-spec-validator-and-unchecked-tasks",
+	"spread-circuit-breaker-and-jev-budget",
+	"batch-merge-and-visual-qa-backend-filter",
+	"legacy-files-migration-and-git-sync",
+	"cycle-on-demand",
+	"queue-full",
+}
+
 // RunScenario executes one named scenario ("happy-path", "quota-continuation", "plan-build-repairs",
 // "rebase-conflict-rebuild", "guardrails-quarantine", "auto-retry-quarantine", "autonomous-cycle",
 // "cycle-on-demand", "queue-full", or "all")
@@ -373,22 +391,7 @@ func RunScenario(ctx context.Context, stackDir, scenario string, out io.Writer) 
 		out = os.Stdout
 	}
 	if scenario == "" || scenario == "all" || scenario == "faults" || scenario == "everything" {
-		names := []string{
-			"happy-path",
-			"quota-continuation",
-			"plan-build-repairs",
-			"rebase-conflict-rebuild",
-			"guardrails-quarantine",
-			"auto-retry-quarantine",
-			"autonomous-cycle",
-			"merger-idempotent-push-and-stale-heal",
-			"native-spec-validator-and-unchecked-tasks",
-			"spread-circuit-breaker-and-jev-budget",
-			"batch-merge-and-visual-qa-backend-filter",
-			"legacy-files-migration-and-git-sync",
-			"cycle-on-demand",
-			"queue-full",
-		}
+		names := append([]string(nil), AllScenarios...)
 		switch scenario {
 		case "faults":
 			names = FaultScenarios

@@ -1375,7 +1375,7 @@ func SyncRepos(ctx context.Context, root string, st *store.Store, publish bool, 
 		}
 		childDir := filepath.Join(root, filepath.FromSlash(p))
 		if !exists(filepath.Join(childDir, ".git")) {
-			if _, err := gitx.RunGit(ctx, root, "submodule", "update", "--init", "--quiet", "--", p); err == nil {
+			if _, err := gitx.SubmoduleUpdateInit(ctx, root, "--quiet", "--", p); err == nil {
 				fmt.Fprintf(out, "  %s: at recorded pointer\n", p)
 			} else {
 				fmt.Fprintf(out, "  %s: ATTENTION (submodule update failed)\n", p)
@@ -1390,7 +1390,7 @@ func SyncRepos(ctx context.Context, root string, st *store.Store, publish bool, 
 		}
 		cBranch, ok := gitx.CurrentBranch(ctx, childDir)
 		if !ok {
-			if _, err := gitx.RunGit(ctx, root, "submodule", "update", "--init", "--quiet", "--", p); err == nil {
+			if _, err := gitx.SubmoduleUpdateInit(ctx, root, "--quiet", "--", p); err == nil {
 				fmt.Fprintf(out, "  %s: at recorded pointer\n", p)
 			} else {
 				fmt.Fprintf(out, "  %s: ATTENTION (submodule update failed)\n", p)

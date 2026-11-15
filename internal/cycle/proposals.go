@@ -1856,12 +1856,12 @@ func recordSession(ctx context.Context, dir, baseBranch, message string, st *sto
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		if err := repo.Push(ctx, remote, "HEAD:refs/heads/"+baseBranch); err == nil {
-			_, _ = gitx.RunGit(ctx, dir, "submodule", "update", "--init", "--quiet")
+			_, _ = gitx.SubmoduleUpdateInit(ctx, dir, "--quiet")
 			return rejected, nil
 		}
 		if rebErr := RebaseProposals(ctx, dir, baseBranch, out); rebErr == nil {
 			if err := repo.Push(ctx, remote, "HEAD:refs/heads/"+baseBranch); err == nil {
-				_, _ = gitx.RunGit(ctx, dir, "submodule", "update", "--init", "--quiet")
+				_, _ = gitx.SubmoduleUpdateInit(ctx, dir, "--quiet")
 				return rejected, nil
 			}
 		}
@@ -2089,7 +2089,7 @@ func PrepareSessionWorktree(ctx context.Context, root, wt, baseRef, baseBranch s
 
 	if fileExists(filepath.Join(wt, ".gitmodules")) {
 		_, _ = gitx.RunGit(ctx, wt, "submodule", "foreach", "--recursive", "git rebase --abort >/dev/null 2>&1 || true; git checkout --force -q; git clean -fdq")
-		if _, err := gitx.RunGit(ctx, wt, "submodule", "update", "--init", "--recursive", "--checkout", "--force"); err != nil {
+		if _, err := gitx.SubmoduleUpdateInit(ctx, wt, "--recursive", "--checkout", "--force"); err != nil {
 			return err
 		}
 		_, _ = gitx.RunGit(ctx, wt, "submodule", "foreach", "--recursive", "git clean -fdq")

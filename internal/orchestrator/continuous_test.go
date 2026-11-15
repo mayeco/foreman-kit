@@ -55,11 +55,6 @@ func writeBacklogJSON(t *testing.T, root string, items ...map[string]any) {
 	}
 }
 
-// signalWindow is how long a test waits for a merge its signal started. A whole integration (rebase,
-// gates, archive, push) takes a few seconds on a machine that runs several suites at once; the tests
-// that use it set the merger's fallback far beyond it, so only the signal can have woken the merger.
-const signalWindow = 30 * time.Second
-
 // waitUntil polls cond every 20ms until it holds or timeout elapses, and reports whether it held.
 func waitUntil(timeout time.Duration, cond func() bool) bool {
 	deadline := time.Now().Add(timeout)
@@ -173,9 +168,7 @@ func TestMergerServeIntegratesImmediately(t *testing.T) {
 
 	hub := NewHub()
 	var log syncBuffer
-	// An hour-long fallback means only the signal can wake the merger during the test, so the
-	// window below can allow for a loaded machine without letting the fallback pass for the signal.
-	merger, err := NewMerger(MergerOptions{Root: umbrellaDir, Store: st, Hub: hub, Out: &log, FallbackInterval: time.Hour})
+	merger, err := NewMerger(MergerOptions{Root: umbrellaDir, Store: st, Hub: hub, Out: &log})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,18 +181,18 @@ func TestMergerServeIntegratesImmediately(t *testing.T) {
 	const change = "serve-merge-now"
 	buildReadyManifest(t, ctx, umbrellaDir, st, change)
 
-	// Only the signal can wake the merger: its fallback is an hour.
+	// Only the signal can wake the merger: its fallback is 30s.
 	signaled := time.Now()
 	hub.ReadyEnqueued()
-	if !waitUntil(signalWindow, func() bool { return integratedOnOrigin(umbrellaDir, change) }) {
-		t.Fatalf("expected %s on origin/master within %s of the ready signal; merger log:\n%s", change, signalWindow, log.String())
+	if !waitUntil(3*time.Second, func() bool { return integratedOnOrigin(umbrellaDir, change) }) {
+		t.Fatalf("expected %s on origin/master within 3s of the ready signal; merger log:\n%s", change, log.String())
 	}
 	t.Logf("integrated %s after %s", change, time.Since(signaled).Round(time.Millisecond))
 	if !strings.Contains(log.String(), "merger: woke (ready)") {
 		t.Fatalf("expected the merger log to name its wake-up reason, got:\n%s", log.String())
 	}
 	// The merger removes the manifest after pushing and cleaning up the worker.
-	if !waitUntil(signalWindow, func() bool { return !inReadyQueue(ctx, st, change) }) {
+	if !waitUntil(3*time.Second, func() bool { return !inReadyQueue(ctx, st, change) }) {
 		t.Fatalf("expected %s to leave the merge queue once integrated", change)
 	}
 
@@ -430,23 +423,14 @@ func TestCycleDoesNotBlockMerges(t *testing.T) {
 		SkipWorktreePrep: true,
 		AgentExecFunc: func(ctx context.Context, workdir, promptFile, engine string, timeout time.Duration, out io.Writer) error {
 			close(judging)
-			select { // a judgment that outlasts the merge's whole window
-			case <-time.After(2 * signalWindow):
+			select { // a long judgment
+			case <-time.After(5 * time.Second):
 			case <-ctx.Done():
 			}
 			judgmentEnded.Store(true)
 			return nil
 		},
 	})
-	// Only the signal can wake the daemon's merger during the test: its fallback is an hour.
-	opts.ServeMergerFunc = func(ctx context.Context, root string, out io.Writer) error {
-		m, err := NewMerger(MergerOptions{Root: root, Store: st, Hub: hub, Out: out, FallbackInterval: time.Hour})
-		if err != nil {
-			return err
-		}
-		defer m.Close()
-		return m.Serve(ctx)
-	}
 
 	daemonDone := make(chan int, 1)
 	go func() { daemonDone <- cycle.StartDaemon(ctx, umbrellaDir, st, opts, io.Discard, io.Discard) }()
@@ -460,7 +444,7 @@ func TestCycleDoesNotBlockMerges(t *testing.T) {
 		t.Fatal(err)
 	}
 	hub.ReadyEnqueued()
-	if !waitUntil(signalWindow, func() bool { return integratedOnOrigin(umbrellaDir, change) }) {
+	if !waitUntil(4*time.Second, func() bool { return integratedOnOrigin(umbrellaDir, change) }) {
 		t.Fatalf("expected %s integrated while the judgment runs; daemon log:\n%s", change, readDaemonLog(umbrellaDir))
 	}
 	if judgmentEnded.Load() {

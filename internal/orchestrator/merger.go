@@ -719,7 +719,12 @@ func (m *Merger) blockChange(ctx context.Context, manifest store.ReadyManifest, 
 		rebuilds = qPrev.Rebuilds
 		approved = qPrev.ApprovedRisk
 	}
-	_ = m.store.BlockChange(ctx, store.QuarantineRecord{
+	result := store.MergeBlocked
+	if blocked.Reason == "push_rejected" || blocked.Reason == "push_failed" {
+		result = store.MergePushRejected
+	}
+	// One transaction: the block, its event, the manifest leaving the queue and the attempt's result.
+	err := m.store.BlockChangeWith(ctx, store.QuarantineRecord{
 		ChangeName:   change,
 		Reason:       blocked.Reason,
 		Details:      blocked.Details,
@@ -730,22 +735,29 @@ func (m *Merger) blockChange(ctx context.Context, manifest store.ReadyManifest, 
 		Rebuilds:     rebuilds,
 		ApprovedRisk: approved,
 		BlockedAt:    m.nowFunc().Format(time.RFC3339),
-	})
-	_ = m.store.EmitEvent(ctx, store.EventInput{
-		Event:  "change.blocked",
-		Change: change,
-		Payload: map[string]any{
-			"reason": blocked.Reason,
-			"stage":  ws.MergerState,
+	}, store.BlockEffects{
+		Event: &store.EventInput{
+			Event:  "change.blocked",
+			Change: change,
+			Payload: map[string]any{
+				"reason": blocked.Reason,
+				"stage":  ws.MergerState,
+			},
 		},
+		CloseManifest: true,
+		AttemptID:     m.attemptID,
+		AttemptResult: result,
+		AttemptReason: cutText(blocked.Reason, 4000),
 	})
-	m.logf("merger: %s: blocked (%s at %s): foreman-kit status", change, blocked.Reason, ws.MergerState)
-	_ = m.store.CloseReady(ctx, change, store.ManifestBlocked)
-	result := store.MergeBlocked
-	if blocked.Reason == "push_rejected" || blocked.Reason == "push_failed" {
-		result = store.MergePushRejected
+	if err != nil {
+		// Nothing was written: the change keeps its manifest in the queue with no block, and the next
+		// pass takes it again. The attempt is the only thing closed, as stopped.
+		m.logf("merger: %s: could not record the block (%s at %s): %v; the change stays queued", change, blocked.Reason, ws.MergerState, err)
+		m.finishAttempt(ctx, store.MergeStopped, "the block of "+blocked.Reason+" could not be recorded: "+err.Error())
+	} else {
+		m.attemptID = 0
+		m.logf("merger: %s: blocked (%s at %s): foreman-kit status", change, blocked.Reason, ws.MergerState)
 	}
-	m.finishAttempt(ctx, result, blocked.Reason)
 	// It left the merge queue: a retry may become due, and what waited on it is re-evaluated.
 	m.opts.Hub.BacklogChanged()
 }

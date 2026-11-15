@@ -394,6 +394,26 @@ func (s *Store) consumeRequestsTx(ctx context.Context, tx *sql.Tx, change string
 // for is spent: the block is what the change waits on now. The worker run or merge attempt in the
 // scope of ctx is recorded as where it happened.
 func (s *Store) BlockChange(ctx context.Context, rec QuarantineRecord) error {
+	return s.BlockChangeWith(ctx, rec, BlockEffects{})
+}
+
+// BlockEffects is what a block writes in its own transaction besides the block row: the event that
+// announces it, the change's open ready manifest leaving the merge queue as blocked, and the result
+// of the merge attempt that decided it. The zero value writes none of them.
+type BlockEffects struct {
+	// Event, when set, is emitted with the block (change.blocked).
+	Event *EventInput
+	// CloseManifest closes the change's open ready manifest with the outcome blocked.
+	CloseManifest bool
+	// AttemptID, when positive, is the merge attempt finished with AttemptResult and AttemptReason.
+	AttemptID     int64
+	AttemptResult string
+	AttemptReason string
+}
+
+// BlockChangeWith is BlockChange that also writes eff in the same transaction: a failing statement
+// leaves the block, the event, the manifest and the attempt as they were.
+func (s *Store) BlockChangeWith(ctx context.Context, rec QuarantineRecord, eff BlockEffects) error {
 	sc := ScopeFrom(ctx)
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		now := s.nowMS()
@@ -449,11 +469,23 @@ func (s *Store) BlockChange(ctx context.Context, rec QuarantineRecord) error {
 			return err
 		}
 		if rec.ApprovedRisk && st.approvalID == 0 && !st.exists() {
-			_, err = tx.ExecContext(ctx, `
+			if _, err = tx.ExecContext(ctx, `
 				INSERT INTO risk_approvals (change_name, approved_by, approved_at) VALUES (?, 'operator', ?)
-			`, rec.ChangeName, now)
+			`, rec.ChangeName, now); err != nil {
+				return err
+			}
 		}
-		return err
+		if eff.Event != nil {
+			if err := s.emitEventTx(ctx, tx, *eff.Event); err != nil {
+				return err
+			}
+		}
+		if eff.CloseManifest {
+			if err := s.closeReadyTx(ctx, tx, rec.ChangeName, ManifestBlocked); err != nil {
+				return err
+			}
+		}
+		return s.finishMergeAttemptTx(ctx, tx, eff.AttemptID, eff.AttemptResult, eff.AttemptReason)
 	})
 }
 

@@ -309,12 +309,26 @@ func (s *Store) AcquireLock(ctx context.Context, key string, opts LockOptions) (
 		}
 	}
 
-	_, err = conn.ExecContext(ctx, `
+	if _, err := conn.ExecContext(ctx, `
 		INSERT INTO locks (lock_key, owner_type, pid, host, slot, stamp, acquired_at, heartbeat_at, ttl_seconds, metadata_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, key, opts.OwnerType, opts.PID, opts.Host, opts.Slot, opts.Stamp, nowMS, nowMS, ttlSec, metaStr)
-	if err != nil {
+	`, key, opts.OwnerType, opts.PID, opts.Host, opts.Slot, opts.Stamp, nowMS, nowMS, ttlSec, metaStr); err != nil {
 		return nil, err
+	}
+
+	// The event announces the takeover: it is written in the transaction that makes it, never after it.
+	if reclaimed != nil {
+		if err := s.emitEventTx(ctx, conn, EventInput{
+			Event: "lease.stale_reclaimed",
+			PID:   opts.PID,
+			Payload: map[string]any{
+				"lock_key":      key,
+				"previous_pid":  reclaimed.PID,
+				"previous_host": reclaimed.Host,
+			},
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -328,18 +342,6 @@ func (s *Store) AcquireLock(ctx context.Context, key string, opts LockOptions) (
 	}
 	committed = true
 	_ = conn.Close()
-
-	if reclaimed != nil {
-		_ = s.EmitEvent(ctx, EventInput{
-			Event: "lease.stale_reclaimed",
-			PID:   opts.PID,
-			Payload: map[string]any{
-				"lock_key":      key,
-				"previous_pid":  reclaimed.PID,
-				"previous_host": reclaimed.Host,
-			},
-		})
-	}
 
 	return &LockRecord{
 		LockKey:      key,

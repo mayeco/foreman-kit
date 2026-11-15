@@ -2380,7 +2380,7 @@ func (d *Dispatcher) handleChangeError(ctx context.Context, change string, err e
 		rebuilds = qPrev.Rebuilds
 		approved = qPrev.ApprovedRisk
 	}
-	_ = d.store.BlockChange(ctx, store.QuarantineRecord{
+	err = d.store.BlockChangeWith(ctx, store.QuarantineRecord{
 		ChangeName:   change,
 		Reason:       blocked.Reason,
 		Details:      blocked.Details,
@@ -2390,14 +2390,17 @@ func (d *Dispatcher) handleChangeError(ctx context.Context, change string, err e
 		Rebuilds:     rebuilds,
 		ApprovedRisk: approved,
 		BlockedAt:    d.nowFunc().Format(time.RFC3339),
-	})
-	_ = d.store.EmitEvent(ctx, store.EventInput{
+	}, store.BlockEffects{Event: &store.EventInput{
 		Event:  "change.blocked",
 		Change: change,
 		Payload: map[string]any{
 			"reason": blocked.Reason,
 		},
-	})
+	}})
+	if err != nil {
+		d.logf("dispatcher: %s: could not record the block (%s): %v", change, blocked.Reason, err)
+		return "blocked"
+	}
 	d.logf("dispatcher: %s: blocked (%s): foreman-kit status", change, blocked.Reason)
 	return "blocked"
 }

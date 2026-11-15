@@ -259,12 +259,17 @@ func (s *Store) ListReadyQueue(ctx context.Context) ([]ReadyManifest, error) {
 // CloseReady takes the manifest of a change out of the merge queue with the outcome it had (a
 // Manifest* constant). A change with no manifest in the queue is left as it is.
 func (s *Store) CloseReady(ctx context.Context, change, outcome string) error {
+	return s.closeReadyTx(ctx, s.db, change, outcome)
+}
+
+// closeReadyTx is CloseReady over q, the transaction of the fact that takes the manifest out of the queue.
+func (s *Store) closeReadyTx(ctx context.Context, q querier, change, outcome string) error {
 	switch outcome {
 	case ManifestIntegrated, ManifestSentBack, ManifestBlocked, ManifestRemoved, ManifestInvalid, ManifestAlreadyIntegrated:
 	default:
 		outcome = ManifestRemoved
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := q.ExecContext(ctx, `
 		UPDATE ready_manifests SET closed_at = ?, outcome = ? WHERE change_name = ? AND closed_at IS NULL
 	`, s.nowMS(), outcome, change)
 	return err
@@ -375,6 +380,11 @@ func (s *Store) MarkMergeAttemptIntegrated(ctx context.Context, id int64, commit
 // FinishMergeAttempt records how an open merge attempt ended (a Merge* constant) and why. An attempt
 // that was already closed (as stopped, by the merger that took over) keeps the result it has.
 func (s *Store) FinishMergeAttempt(ctx context.Context, id int64, result, reason string) error {
+	return s.finishMergeAttemptTx(ctx, s.db, id, result, reason)
+}
+
+// finishMergeAttemptTx is FinishMergeAttempt over q, the transaction of the decision it records.
+func (s *Store) finishMergeAttemptTx(ctx context.Context, q querier, id int64, result, reason string) error {
 	if id <= 0 {
 		return nil
 	}
@@ -383,7 +393,7 @@ func (s *Store) FinishMergeAttempt(ctx context.Context, id int64, result, reason
 	default:
 		result = MergeStopped
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := q.ExecContext(ctx, `
 		UPDATE merge_attempts
 		SET result = CASE WHEN ?1 = 'integrated' AND integrated_commit IS NULL THEN 'already_integrated' ELSE ?1 END,
 		    result_reason = ?2, finished_at = ?3

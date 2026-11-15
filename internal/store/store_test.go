@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -196,6 +197,9 @@ func TestMigrateFromFilesEndToEnd(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(tmp, "log", "cycle", "cycle-20261107T100000Z.log"), []byte("cycle log"), 0o644)
 	_ = os.WriteFile(filepath.Join(tmp, "log", "cycle", "visual_queue.json"), []byte(`{"items":[{"id":"1","change":"feat-alpha","detail":"Check alpha UI","status":"pending"}]}`), 0o644)
 	_ = os.WriteFile(filepath.Join(tmp, "log", "portal", "runs", "run-1.json"), []byte(`{"id":"run-1","agent":"hermes","status":"ok"}`), 0o644)
+	_ = os.MkdirAll(filepath.Join(tmp, "log", "approved"), 0o755)
+	_ = os.WriteFile(filepath.Join(tmp, "log", "approved", "feat-ready"), []byte(""), 0o644)
+	_ = os.WriteFile(filepath.Join(tmp, "log", "cycle", "state.json"), []byte(`{"visual_qa_last_sha":"abc123","last_cycle":{"stamp":"20261107T100000Z","outcome":"done","finished_at":"2026-11-07T10:20:00Z"}}`), 0o644)
 
 	st, err := OpenAt(filepath.Join(tmp, "migrated.db"), "mig-test", tmp)
 	if err != nil {
@@ -212,6 +216,25 @@ func TestMigrateFromFilesEndToEnd(t *testing.T) {
 		rep.EventsImported != 2 || rep.RepairRounds != 1 || rep.Cycles != 1 ||
 		rep.VisualQAItems != 1 || rep.PortalRunsJobs != 1 {
 		t.Fatalf("unexpected migration counts: %+v", rep)
+	}
+
+	// A second run finds all of it on record: it inserts nothing, and says so.
+	before := migrationTableCounts(t, st)
+	again, err := st.MigrateFromFiles(ctx, tmp, nil)
+	if err != nil {
+		t.Fatalf("second MigrateFromFiles failed: %v", err)
+	}
+	if want := (MigrationReport{WorkspaceDir: rep.WorkspaceDir, DBPath: rep.DBPath}); *again != want {
+		t.Fatalf("the second run reported %+v, want all counts zero", *again)
+	}
+	if after := migrationTableCounts(t, st); !reflect.DeepEqual(before, after) {
+		t.Fatalf("the second run changed the rows on record:\nbefore %v\nafter  %v", before, after)
+	}
+	for table, n := range before {
+		if n == 0 && (table == "events" || table == "change_blocks" || table == "change_runs" || table == "executions" ||
+			table == "repair_rounds" || table == "cycles" || table == "visual_qa_items") {
+			t.Errorf("the first run left %s empty: the second-run check proves nothing for it", table)
+		}
 	}
 }
 

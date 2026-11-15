@@ -1242,10 +1242,21 @@ const staleIndexLockAge = 10 * time.Minute
 // it. Only the merger, under the merger lock, runs git there, and none of its commands is running now:
 // a lock no git has touched for staleIndexLockAge is a leftover.
 func (m *Merger) removeStaleIndexLocks(ctx context.Context, wt string) {
+	for _, p := range removeIndexLocks(ctx, wt, staleIndexLockAge) {
+		m.logf("merger: removed %s, which no git had touched for %s", p, staleIndexLockAge)
+	}
+}
+
+// removeIndexLocks deletes the index.lock files in the git directory of the worktree wt (for a linked
+// worktree, its administrative directory, which also holds its submodules' git directories) that no
+// git has touched for minAge, and returns the paths it removed. A minAge of 0 removes every lock: the
+// caller knows that no git of wt is running.
+func removeIndexLocks(ctx context.Context, wt string, minAge time.Duration) []string {
 	out, err := gitx.RunGit(ctx, wt, "rev-parse", "--absolute-git-dir")
 	if err != nil {
-		return
+		return nil
 	}
+	var removed []string
 	_ = filepath.WalkDir(strings.TrimSpace(out), func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -1260,11 +1271,12 @@ func (m *Merger) removeStaleIndexLocks(ctx context.Context, wt string) {
 		if d.Name() != "index.lock" {
 			return nil
 		}
-		if info, err := d.Info(); err == nil && time.Since(info.ModTime()) >= staleIndexLockAge && os.Remove(p) == nil {
-			m.logf("merger: removed %s, which no git had touched for %s", p, staleIndexLockAge)
+		if info, err := d.Info(); err == nil && time.Since(info.ModTime()) >= minAge && os.Remove(p) == nil {
+			removed = append(removed, p)
 		}
 		return nil
 	})
+	return removed
 }
 
 func (m *Merger) prepareIntegrationWorktree(ctx context.Context, baseRef string) error {

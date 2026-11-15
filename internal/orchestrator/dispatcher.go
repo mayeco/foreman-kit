@@ -2564,6 +2564,10 @@ func (d *Dispatcher) provisionWorktree(ctx context.Context, wt, change, branch s
 		return err
 	}
 	children, _ := wtRepo.ChildPaths()
+	// The worker's lease is held and reapOrphanAgents has run: no git of this change is alive, so an
+	// index.lock in its git directories is the leftover of one that was killed (a SIGKILL after the
+	// stop grace, a crash, a power loss), and every git add below would fail on it.
+	d.removeWorkerIndexLocks(ctx, wt, change, children)
 	// A rebase killed by a shutdown leaves HEAD detached while feat/spec-<change> still points at the
 	// pre-rebase tip; resuming on top of it would commit BUILD work that the merger later discards.
 	gitx.AbortInterruptedRebase(ctx, wt)

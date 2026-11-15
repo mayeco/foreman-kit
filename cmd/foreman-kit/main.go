@@ -1108,6 +1108,19 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			}
 			defer st.Close()
 
+			// The same guards as the portal's Abandon, from one check: a name the kit does not know,
+			// a change a worker builds or the merger integrates, and one already integrated or
+			// discarded are refused before anything is written. The registry mirrors the backlog
+			// file first, so a change queued there that no pass has mirrored yet is known.
+			if err := st.SyncJSONToSQLite(ctx, root); err != nil {
+				fmt.Fprintf(stderr, "abandon: bringing the registry up to date: %v\n", err)
+				return wrapCode(1)
+			}
+			if err := st.CheckAbandonable(ctx, change); err != nil {
+				fmt.Fprintf(stderr, "abandon: %v\n", err)
+				return wrapCode(1)
+			}
+
 			backlogPath := filepath.Join(root, cycle.BacklogFile)
 			if items, err := cycle.ReadJSONList(backlogPath); err == nil && len(items) > 0 {
 				var kept []map[string]any
@@ -1128,9 +1141,18 @@ func NewRootCmd(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 			}
 
 			// Abandoned: out of the merge queue, its quarantine closed, and discarded in the registry.
-			_ = st.CloseReady(ctx, change, store.ManifestRemoved)
-			_ = st.ResolveQuarantine(ctx, change, store.QuarantineResolution{Resolution: store.BlockAbandoned, By: "cli", Forget: true})
-			_ = st.MarkChangeDiscarded(ctx, change)
+			if err := st.CloseReady(ctx, change, store.ManifestRemoved); err != nil {
+				fmt.Fprintf(stderr, "abandon: %v\n", err)
+				return wrapCode(1)
+			}
+			if err := st.ResolveQuarantine(ctx, change, store.QuarantineResolution{Resolution: store.BlockAbandoned, By: "cli", Forget: true}); err != nil {
+				fmt.Fprintf(stderr, "abandon: %v\n", err)
+				return wrapCode(1)
+			}
+			if err := st.MarkChangeDiscarded(ctx, change); err != nil {
+				fmt.Fprintf(stderr, "abandon: %v\n", err)
+				return wrapCode(1)
+			}
 			_ = os.Remove(filepath.Join(root, "log", "blocked", change+".json"))
 			_ = os.Remove(needsHumanFile(root, change))
 			fmt.Fprintf(stdout, "abandoned: %s\n", change)

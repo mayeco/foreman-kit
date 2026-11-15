@@ -7,6 +7,7 @@ import (
 	"github.com/mayeco/foreman-kit/internal/settings/settingstest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,8 +65,10 @@ func TestUnblockApproveAbandonRemoveNeedsHumanWhereTheDispatcherReadsIt(t *testi
 		}},
 	} {
 		base := tc.base()
+		// An abandoned change is one the kit knows, and it is abandoned once: each case has its own.
+		change := "report-currency-" + strings.ReplaceAll(tc.name, " ", "-")
+		abandonQueue(t, appDir, change)
 		for _, command := range []string{"unblock", "approve", "abandon"} {
-			change := "report-currency"
 			file := needsHumanPathPlant(t, base, change)
 			var out, errBuf bytes.Buffer
 			if code := Run(ctx, []string{command, change, appDir}, &out, &errBuf); code != 0 {

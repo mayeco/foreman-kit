@@ -258,21 +258,15 @@ func (w *workspace) Abandon(ctx context.Context, name string) error {
 	}
 	w.files.Lock()
 	defer w.files.Unlock()
-	state, err := w.store.ChangeState(ctx, name)
-	if err != nil {
+	// The check is the store's, shared with `foreman-kit abandon`.
+	if err := w.store.CheckAbandonable(ctx, name); err != nil {
+		if refusal := store.AsAbandonRefusal(err); refusal != nil {
+			if refusal.Kind == store.AbandonUnknown {
+				return errNotFound("%s", refusal.Error())
+			}
+			return errConflict("%s", refusal.Error())
+		}
 		return err
-	}
-	switch state {
-	case "":
-		return errNotFound("the kit knows no change named %s", name)
-	case store.ChangeBuilding:
-		return errConflict("a worker is building %s: it can be abandoned once its run ends", name)
-	case store.ChangeMerging:
-		return errConflict("the merger is integrating %s: it can be abandoned once that attempt ends", name)
-	case store.ChangeIntegrated:
-		return errConflict("%s is integrated: its commits are on the base branches", name)
-	case store.ChangeDiscarded:
-		return errConflict("%s is already discarded", name)
 	}
 
 	// The backlog first: the dispatcher does not take a change the file no longer lists.

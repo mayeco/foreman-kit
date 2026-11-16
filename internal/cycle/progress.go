@@ -397,20 +397,39 @@ func Status(ctx context.Context, root string, st *store.Store, out io.Writer) er
 			if note != "" {
 				noteStr = fmt.Sprintf(" (%s)", note)
 			}
-			fmt.Fprintf(out, "BLOCKED: %s reason=%s since=%s%s\n", b.ChangeName, b.Reason, b.BlockedAt, noteStr)
+			detailSuffix := ""
+			if sum := blockedDetailSummary(b); sum != "" {
+				detailSuffix = ": " + sum
+			}
+			fmt.Fprintf(out, "BLOCKED: %s reason=%s since=%s%s%s\n", b.ChangeName, b.Reason, b.BlockedAt, noteStr, detailSuffix)
 		}
 		for _, bb := range BrokenBases(ctx, root, st) {
 			fmt.Fprintln(out, bb.StatusLine())
 		}
 
 		allLocks, _ := st.ListLocks(ctx)
+		inFlightSet := make(map[string]bool)
 		systemLocks := map[string]bool{
 			"cycle": true, "dispatch": true, "visual_qa": true,
 			"dispatcher": true, "merger": true, "record": true, "daemon": true,
 		}
 		for _, l := range allLocks {
+			if chg, ok := store.WorkerLeaseChange(l.LockKey); ok {
+				inFlightSet[chg] = true
+			}
 			if !systemLocks[l.LockKey] {
 				fmt.Fprintf(out, "LEASE: %s\n", l.LockKey)
+			}
+		}
+		if len(blockedList) > 0 && len(inFlightSet) == 0 && len(readyList) == 0 {
+			if backlog, err := ReadJSONList(filepath.Join(root, filepath.FromSlash(BacklogFile))); err == nil && len(backlog) > 0 {
+				bNames := make(map[string]bool, len(blockedList))
+				for _, b := range blockedList {
+					bNames[b.ChangeName] = true
+				}
+				if stalled := stalledOnBlockedSummary(backlog, integratedChanges(ctx, root), bNames, map[string]bool{}, inFlightSet); stalled != "" {
+					fmt.Fprintf(out, "STALLED: %s\n", stalled)
+				}
 			}
 		}
 	}
@@ -736,11 +755,18 @@ func Progress(ctx context.Context, root string, st *store.Store, since time.Time
 				"blocked_at":  b.BlockedAt,
 			})
 		}
-		needsHumanBlocked = append(needsHumanBlocked, map[string]any{
+		entry := map[string]any{
 			"change_name": b.ChangeName,
 			"reason":      b.Reason,
 			"retry":       RetryNote(root, b),
-		})
+		}
+		if b.Details != "" {
+			entry["details"] = b.Details
+		}
+		if sum := blockedDetailSummary(b); sum != "" {
+			entry["summary"] = sum
+		}
+		needsHumanBlocked = append(needsHumanBlocked, entry)
 	}
 	if blockedInPeriod == nil {
 		blockedInPeriod = []map[string]any{}
@@ -978,11 +1004,17 @@ func Progress(ctx context.Context, root string, st *store.Store, since time.Time
 			"items_listed": itemsListed,
 			"proposals":    fromRoadmap,
 		},
-		"health": map[string]any{
-			"last_cycle":        lastCycleSummary,
-			"judgment_outcome":  judgmentOutcome,
-			"blocked_by_reason": blockedByReason,
-		},
+		"health": func() map[string]any {
+			hm := map[string]any{
+				"last_cycle":        lastCycleSummary,
+				"judgment_outcome":  judgmentOutcome,
+				"blocked_by_reason": blockedByReason,
+			}
+			if stalled := stalledOnBlockedSummary(backlog, everIntegrated, blockedNames, readySet, inFlightSet); stalled != "" {
+				hm["stalled"] = stalled
+			}
+			return hm
+		}(),
 		"needs_human": map[string]any{
 			"paused":               pausedVal,
 			"blocked":              needsHumanBlocked,
@@ -1118,6 +1150,9 @@ func FormatProgressText(r map[string]any) string {
 		jo = "none"
 	}
 	lines = append(lines, fmt.Sprintf("  judgment's last outcome: %s", jo))
+	if stalled := asString(h["stalled"]); stalled != "" {
+		lines = append(lines, fmt.Sprintf("  stalled: %s", stalled))
+	}
 
 	lines = append(lines, "== Needs a human")
 	var asks []string
@@ -1126,7 +1161,11 @@ func FormatProgressText(r map[string]any) string {
 	}
 	if bl, ok := n["blocked"].([]map[string]any); ok {
 		for _, b := range bl {
-			asks = append(asks, fmt.Sprintf("%s is blocked (%s; %s)", asString(b["change_name"]), asString(b["reason"]), asString(b["retry"])))
+			line := fmt.Sprintf("%s is blocked (%s; %s)", asString(b["change_name"]), asString(b["reason"]), asString(b["retry"]))
+			if sum := asString(b["summary"]); sum != "" {
+				line += ": " + sum
+			}
+			asks = append(asks, line)
 		}
 	}
 	if bb, ok := n["broken_bases"].([]map[string]any); ok {
@@ -1509,6 +1548,118 @@ func joinOrNone(items []string) string {
 		return "none"
 	}
 	return strings.Join(items, ", ")
+}
+
+func blockedDetailSummary(b store.QuarantineRecord) string {
+	if b.Reason != "rebase_conflict" || strings.TrimSpace(b.Details) == "" {
+		return ""
+	}
+	var summaries []string
+	for _, line := range strings.Split(b.Details, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "repos/") && strings.Contains(line, "(") && strings.HasSuffix(line, ")") {
+			summaries = append(summaries, line)
+		}
+	}
+	if len(summaries) > 0 {
+		return strings.Join(summaries, "; ")
+	}
+	first := strings.TrimSpace(strings.SplitN(strings.TrimSpace(b.Details), "\n", 2)[0])
+	return first
+}
+
+func stalledOnBlockedSummary(
+	backlog []map[string]any,
+	integrated map[string]bool,
+	blocked map[string]bool,
+	ready map[string]bool,
+	inFlight map[string]bool,
+) string {
+	if len(inFlight) > 0 || len(ready) > 0 || len(blocked) == 0 || len(backlog) == 0 {
+		return ""
+	}
+	depsOf := make(map[string][]string, len(backlog))
+	var pending []string
+	seen := make(map[string]bool, len(backlog))
+	for _, item := range backlog {
+		name := asString(item["change_name"])
+		if name == "" || seen[name] || !ChangeNameRe.MatchString(name) {
+			continue
+		}
+		seen[name] = true
+		var deps []string
+		if rawDeps, ok := item["depends_on"].([]any); ok {
+			for _, d := range rawDeps {
+				if ds := strings.TrimSpace(asString(d)); ds != "" {
+					deps = append(deps, ds)
+				}
+			}
+		} else if strDeps, ok := item["depends_on"].([]string); ok {
+			for _, d := range strDeps {
+				if ds := strings.TrimSpace(d); ds != "" {
+					deps = append(deps, ds)
+				}
+			}
+		}
+		depsOf[name] = deps
+		if integrated[name] || blocked[name] || ready[name] || inFlight[name] {
+			continue
+		}
+		pending = append(pending, name)
+	}
+	if len(pending) == 0 {
+		return ""
+	}
+
+	var findBlockedRoots func(name string, visited map[string]bool) []string
+	findBlockedRoots = func(name string, visited map[string]bool) []string {
+		if visited[name] {
+			return nil
+		}
+		visited[name] = true
+		var out []string
+		for _, dep := range depsOf[name] {
+			if integrated[dep] {
+				continue
+			}
+			if blocked[dep] {
+				out = append(out, dep)
+			}
+			out = append(out, findBlockedRoots(dep, visited)...)
+		}
+		return out
+	}
+
+	waitingCount := 0
+	blockerSet := make(map[string]bool)
+	var blockers []string
+	for _, name := range pending {
+		var unintegrated []string
+		for _, dep := range depsOf[name] {
+			if !integrated[dep] {
+				unintegrated = append(unintegrated, dep)
+			}
+		}
+		if len(unintegrated) == 0 {
+			// At least one pending item has no unintegrated dependency, so not all items are held by deps.
+			return ""
+		}
+		roots := findBlockedRoots(name, make(map[string]bool))
+		if len(roots) > 0 {
+			waitingCount++
+			for _, r := range roots {
+				if !blockerSet[r] {
+					blockerSet[r] = true
+					blockers = append(blockers, r)
+				}
+			}
+		}
+	}
+	if waitingCount == 0 || len(blockers) == 0 {
+		return ""
+	}
+	sort.Strings(blockers)
+	return fmt.Sprintf("all workers idle, %d item(s) waiting on blocked %s", waitingCount, strings.Join(blockers, ", "))
 }
 
 func isPublishedSinceHead(ctx context.Context, root, relFile string) bool {

@@ -529,7 +529,7 @@ func (d *Dispatcher) DryRun(ctx context.Context) (*DryRunReport, error) {
 		if archived[item.ChangeName] {
 			continue
 		}
-		rows = append(rows, d.buildDryRunRow(item, waited, running, buildingSet, readySet, inFlightCapsMap, qByName, byName, archived, discarded, now))
+		rows = append(rows, d.buildDryRunRow(ctx, item, waited, running, buildingSet, readySet, inFlightCapsMap, qByName, byName, archived, discarded, now))
 	}
 
 	if held := heldByBrokenBases(ctx, d.root, d.store, readyManifests, d.cfg().OutsideCommits); len(held) > 0 {
@@ -576,6 +576,7 @@ func (d *Dispatcher) DryRun(ctx context.Context) (*DryRunReport, error) {
 }
 
 func (d *Dispatcher) buildDryRunRow(
+	ctx context.Context,
 	item BacklogItem,
 	waited map[string]*float64,
 	running *RunningDispatchInfo,
@@ -651,7 +652,16 @@ func (d *Dispatcher) buildDryRunRow(
 	case len(sharedCaps) > 0:
 		state = "held"
 		why = "held: shares " + strings.Join(sharedCaps, ", ") + " with a change in flight"
-	case running != nil && running.Results[change] != "":
+	case func() bool {
+		op, where := d.worktreeInProgress(ctx, change)
+		if op != "" {
+			state = "held"
+			why = fmt.Sprintf("held: a %s is in progress in its worktree (%s)", op, where)
+			return true
+		}
+		return false
+	}():
+	case running != nil && running.Mode != "continuous" && running.Results[change] != "":
 		state = "next_dispatch"
 		why = fmt.Sprintf("starts in the next dispatch: this one already ended it (%s)", running.Results[change])
 	default:
@@ -726,10 +736,12 @@ func (d *Dispatcher) runningDispatchInfo(ctx context.Context) *RunningDispatchIn
 		var meta struct {
 			StartedAt string            `json:"started_at"`
 			Workers   int               `json:"workers"`
+			Mode      string            `json:"mode"`
 			Results   map[string]string `json:"results"`
 		}
 		if json.Unmarshal([]byte(lk.MetadataJSON), &meta) == nil {
 			info.StartedAt = meta.StartedAt
+			info.Mode = meta.Mode
 			if meta.Workers > 0 {
 				info.Workers = meta.Workers
 			}
@@ -996,6 +1008,7 @@ func (d *Dispatcher) pass(ctx context.Context) passResult {
 	// This pass observes whatever a pending signal announced (its own finished workers included).
 	select {
 	case <-d.opts.Hub.Backlog():
+		_ = d.opts.Hub.TakeWakeReason()
 	default:
 	}
 	// From here on the pass reads what is queued: an item queued before this instant is in what the
@@ -1218,7 +1231,7 @@ func (d *Dispatcher) Serve(ctx context.Context) error {
 			d.recordWorkerOutcome(ctx, out)
 			d.logf("dispatcher: woke (worker %s: %s)", out.Change, out.Result)
 		case <-d.opts.Hub.Backlog():
-			d.logf("dispatcher: woke (backlog)")
+			d.logf("dispatcher: woke (%s)", d.opts.Hub.TakeWakeReason())
 		case <-fallback.C:
 		}
 	}
@@ -1275,6 +1288,7 @@ func (d *Dispatcher) forgetSettledResults(ctx context.Context, ready map[string]
 	cooling := d.coolingLocked(now)
 	d.stateMu.Unlock()
 
+	changed := false
 	for change, res := range results {
 		d.stateMu.Lock()
 		archived := d.archived[change]
@@ -1287,9 +1301,32 @@ func (d *Dispatcher) forgetSettledResults(ctx context.Context, ready map[string]
 		d.stateMu.Lock()
 		if d.results[change] == res {
 			delete(d.results, change)
+			changed = true
 		}
 		d.stateMu.Unlock()
 	}
+	if changed {
+		d.syncLockMetadata(ctx)
+	}
+}
+
+func (d *Dispatcher) syncLockMetadata(ctx context.Context) {
+	if d.store == nil || d.store.DB() == nil {
+		return
+	}
+	resCopy := d.resultsCopy()
+	meta := map[string]any{
+		"started_at": d.startedAt,
+		"workers":    d.cfg().workers,
+		"results":    resCopy,
+	}
+	if d.serving {
+		meta["mode"] = "continuous"
+	}
+	if d.runID != 0 {
+		meta["dispatcher_run_id"] = d.runID
+	}
+	_ = d.store.SetLockMetadata(ctx, "dispatcher", os.Getpid(), meta)
 }
 
 // startable drops the eligible items whose worker lease is held elsewhere (another dispatcher, a portal
@@ -1370,33 +1407,15 @@ func (d *Dispatcher) recordWorkerOutcome(ctx context.Context, out workerOutcome)
 	}
 	delete(d.building, out.Change)
 	delete(d.active, out.Change)
-	if out.Result == "held" {
+	hasHeldCaps := len(d.held[out.Change]) > 0
+	if out.Result == "held" && hasHeldCaps {
 		d.logf("dispatcher: %s: held: it changes what a change in flight changes; it starts once that one ends", out.Change)
-	}
-	resCopy := make(map[string]string, len(d.results))
-	for k, v := range d.results {
-		resCopy[k] = v
 	}
 	d.stateMu.Unlock()
 	// A slot is free.
 	d.opts.Hub.BacklogChanged()
 
-	if d.store != nil && d.store.DB() != nil {
-		meta := map[string]any{
-			"started_at": d.startedAt,
-			"workers":    d.cfg().workers,
-			"results":    resCopy,
-		}
-		if d.serving {
-			// Keep what Serve wrote at acquisition: progress and a cron cycle read it to tell the
-			// daemon's dispatcher from one started by hand.
-			meta["mode"] = "continuous"
-		}
-		if d.runID != 0 {
-			meta["dispatcher_run_id"] = d.runID
-		}
-		_ = d.store.SetLockMetadata(ctx, "dispatcher", os.Getpid(), meta)
-	}
+	d.syncLockMetadata(ctx)
 
 	// The event names the run it closes: the latest one of the change, which the worker finished with
 	// this result before it reported it. A worker that found the change busy had no run.
@@ -1900,6 +1919,10 @@ func (d *Dispatcher) retryBlocked(ctx context.Context, backlog []BacklogItem) {
 		if now.Before(dueAt) {
 			continue
 		}
+		if op, where := d.worktreeInProgress(ctx, change); op != "" {
+			d.noteWorktreeInProgress(change, op, where)
+			continue
+		}
 
 		// The rebuilds the merger asked for keep counting across the retry, unless what is retried is
 		// the block for having run out of them (rebase_conflict): the store derives both.
@@ -1910,6 +1933,7 @@ func (d *Dispatcher) retryBlocked(ctx context.Context, backlog []BacklogItem) {
 		d.stateMu.Lock()
 		delete(d.results, change)
 		d.stateMu.Unlock()
+		d.syncLockMetadata(ctx)
 
 		_ = d.store.EmitEvent(ctx, store.EventInput{
 			Event:  "change.retry",
@@ -1925,20 +1949,76 @@ func (d *Dispatcher) retryBlocked(ctx context.Context, backlog []BacklogItem) {
 
 func (d *Dispatcher) requeueRequestedRebuilds(ctx context.Context) {
 	d.stateMu.Lock()
-	defer d.stateMu.Unlock()
+	changed := false
 	for chg, res := range d.results {
 		switch res {
 		case "ready":
 			q, err := d.store.GetQuarantine(ctx, chg)
 			if err == nil && q != nil && q.Status == "rebuild_requested" {
 				delete(d.results, chg)
+				changed = true
 			}
 		case "blocked":
 			if !d.isBlocked(ctx, chg) {
 				delete(d.results, chg)
+				changed = true
 			}
 		}
 	}
+	d.stateMu.Unlock()
+	if changed {
+		d.syncLockMetadata(ctx)
+	}
+}
+
+func (d *Dispatcher) worktreeInProgress(ctx context.Context, change string) (string, string) {
+	wt := filepath.Join(d.worktreeBase(), "worker-"+change)
+	if !dirExists(wt) {
+		return "", ""
+	}
+	if op := gitx.OperationInProgress(ctx, wt); op != "" {
+		return op, "umbrella"
+	}
+	var children []string
+	if wtRepo, err := gitx.Open(wt); err == nil {
+		children, _ = wtRepo.ChildPaths()
+	}
+	if len(children) == 0 {
+		if rootRepo, err := gitx.Open(d.opts.Root); err == nil {
+			children, _ = rootRepo.ChildPaths()
+		}
+	}
+	for _, cp := range children {
+		childDir := filepath.Join(wt, filepath.FromSlash(cp))
+		if _, err := os.Stat(filepath.Join(childDir, ".git")); err == nil {
+			if op := gitx.OperationInProgress(ctx, childDir); op != "" {
+				return op, cp
+			}
+		}
+	}
+	return "", ""
+}
+
+func (d *Dispatcher) noteWorktreeInProgress(change, op, where string) {
+	key := "change.in_progress:" + change + ":" + op + ":" + where
+	d.stateMu.Lock()
+	first := !d.reported[key]
+	d.reported[key] = true
+	d.stateMu.Unlock()
+	if first {
+		d.logf("dispatcher: %s: held: a %s is in progress in its worktree (%s)", change, op, where)
+	}
+}
+
+func (d *Dispatcher) clearWorktreeInProgressNote(change string) {
+	prefix := "change.in_progress:" + change + ":"
+	d.stateMu.Lock()
+	for k := range d.reported {
+		if strings.HasPrefix(k, prefix) {
+			delete(d.reported, k)
+		}
+	}
+	d.stateMu.Unlock()
 }
 
 func (d *Dispatcher) isEligible(ctx context.Context, item BacklogItem) bool {
@@ -1956,6 +2036,11 @@ func (d *Dispatcher) isEligible(ctx context.Context, item BacklogItem) bool {
 		}
 		return false
 	}
+	if op, where := d.worktreeInProgress(ctx, change); op != "" {
+		d.noteWorktreeInProgress(change, op, where)
+		return false
+	}
+	d.clearWorktreeInProgressNote(change)
 	d.stateMu.Lock()
 	isArch := d.archived[change]
 	for _, dep := range item.DependsOn {
@@ -2190,6 +2275,12 @@ func (d *Dispatcher) processChange(ctx context.Context, item BacklogItem, slot i
 			result = d.workerPanicked(change, r, fail)
 		}
 	}()
+	if op, where := d.worktreeInProgress(workCtx, change); op != "" {
+		d.noteWorktreeInProgress(change, op, where)
+		return "held"
+	}
+	d.clearWorktreeInProgressNote(change)
+
 	wasRebuildReq, rebuildDetails := d.pendingRebuildRequest(workCtx, change)
 	_ = d.store.EmitEvent(workCtx, store.EventInput{
 		Event:  "change.start",
@@ -2233,15 +2324,16 @@ func (d *Dispatcher) processChange(ctx context.Context, item BacklogItem, slot i
 	if err != nil {
 		return fail(err)
 	}
-	if wasRebuildReq && judgedSendBack(rebuildDetails) {
-		// The merger sent it back on a judgment of the evaluator (lost or contradicted concurrent work), not for a
-		// conflict: the rebase is clean, so the BUILD agent must be given the feedback explicitly.
+	if wasRebuildReq && (judgedSendBack(rebuildDetails) || keptRebuildFeedback(rebuildDetails)) {
+		// The merger sent it back on a judgment of the evaluator (lost or contradicted concurrent work),
+		// or an earlier rebuild pass already reset the child branch and kept the previous implementation
+		// on a -conflict-N branch before stopping: give the BUILD agent the feedback explicitly.
 		if rebuildFeedback == "" {
 			if err := d.reopenTasks(workCtx, wt, change); err != nil {
 				return fail(err)
 			}
 			rebuildFeedback = rebuildDetails
-		} else {
+		} else if judgedSendBack(rebuildDetails) {
 			rebuildFeedback += "\n\n" + rebuildDetails
 		}
 	}
@@ -2258,11 +2350,9 @@ func (d *Dispatcher) processChange(ctx context.Context, item BacklogItem, slot i
 	if !ownsLease() {
 		return "lost"
 	}
-	if wasRebuildReq {
-		// The rebuild the merger asked for is built: its request is consumed only now, before the change
-		// is queued again (a request pending on a queued change means the merger sent it back once more).
-		d.takeRebuildRequest(ctx, change)
-	}
+	// Any rebuild request (from the merger or initiated by refreshPhase) is consumed only now, once the
+	// rebuilt change is built and about to be queued again.
+	d.takeRebuildRequest(ctx, change)
 	if err := d.enqueueReady(ctx, change, wt, branch, caps, assessment, item); err != nil {
 		return fail(err)
 	}
@@ -2586,16 +2676,9 @@ func (d *Dispatcher) provisionWorktree(ctx context.Context, wt, change, branch s
 	// The worker's lease is held and reapOrphanAgents has run: no git of this change is alive, so an
 	// index.lock in its git directories is the leftover of one that was killed (a SIGKILL after the
 	// stop grace, a crash, a power loss), and every git add below would fail on it.
+	// Never abort an in-progress rebase, merge or cherry-pick in a kept worktree: a person may be
+	// resolving a conflict there by hand.
 	d.removeWorkerIndexLocks(ctx, wt, change, children)
-	// A rebase killed by a shutdown leaves HEAD detached while feat/spec-<change> still points at the
-	// pre-rebase tip; resuming on top of it would commit BUILD work that the merger later discards.
-	gitx.AbortInterruptedRebase(ctx, wt)
-	for _, cp := range children {
-		childDir := filepath.Join(wt, filepath.FromSlash(cp))
-		if _, err := os.Stat(filepath.Join(childDir, ".git")); err == nil {
-			gitx.AbortInterruptedRebase(ctx, childDir)
-		}
-	}
 	needsSubmoduleInit := false
 	for _, cp := range children {
 		if _, err := os.Stat(filepath.Join(wt, filepath.FromSlash(cp), ".git")); err != nil {
@@ -2982,22 +3065,20 @@ func (d *Dispatcher) refreshPhase(ctx context.Context, item BacklogItem, wt, bra
 	_, specsDiffErr := gitx.RunGit(ctx, wt, "diff", "--quiet", fork, baseRef, "--", "openspec/specs")
 	specsMoved := specsDiffErr != nil
 
-	if fork != "" && baseSHA != "" && fork != baseSHA {
-		if len(children) > 0 {
-			if childGitlinksMoved(ctx, wt, fork, children) {
-				if _, err := gitx.RunGit(ctx, wt, "reset", "--soft", fork); err != nil {
-					return "", err
-				}
-				resetArgs := append([]string{"reset", fork, "--"}, children...)
-				if _, err := gitx.RunGit(ctx, wt, resetArgs...); err != nil {
-					return "", err
-				}
-				if err := d.commitUmbrella(ctx, wt, "docs(openspec): plan "+change, []string{"openspec/changes/" + change}); err != nil {
-					return "", err
-				}
-			}
+	if fork != "" && len(children) > 0 && childGitlinksMoved(ctx, wt, fork, children) {
+		if _, err := gitx.RunGit(ctx, wt, "reset", "--soft", fork); err != nil {
+			return "", err
 		}
+		resetArgs := append([]string{"reset", fork, "--"}, children...)
+		if _, err := gitx.RunGit(ctx, wt, resetArgs...); err != nil {
+			return "", err
+		}
+		if err := d.commitUmbrella(ctx, wt, "docs(openspec): plan "+change, []string{"openspec/changes/" + change}); err != nil {
+			return "", err
+		}
+	}
 
+	if fork != "" && baseSHA != "" && fork != baseSHA {
 		reb := gitx.RebaseBranch(ctx, wt, baseRef)
 		if !reb.OK {
 			reason := "rebase_failed"
@@ -3019,7 +3100,17 @@ func (d *Dispatcher) refreshPhase(ctx context.Context, item BacklogItem, wt, bra
 		}
 	}
 
-	var rebuilt []string
+	type childConflict struct {
+		cp           string
+		childDir     string
+		target       string
+		reb          gitx.RebaseResult
+		conflictDesc string
+	}
+	var conflicts []childConflict
+	var conflictDescs []string
+	checkRemoteOnto := wasRebuildReq || d.hadRebaseConflict(ctx, change)
+
 	for _, cp := range children {
 		childDir := filepath.Join(wt, filepath.FromSlash(cp))
 		target, err := wtRepo.TreeEntryHash("HEAD", cp)
@@ -3047,19 +3138,18 @@ func (d *Dispatcher) refreshPhase(ctx context.Context, item BacklogItem, wt, bra
 			d.rollbackMoved[change][cp] = [2]string{rb.From, rb.To}
 			d.stateMu.Unlock()
 		}
-		_, branchErr := gitx.RunGit(ctx, childDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
-		if branchErr == nil && wasRebuildReq {
-			// The merger sent the change back because its commits conflict with the child's
-			// remote base branch, which it rebases onto. When commits were pushed there outside
-			// the pipeline (a hotfix the umbrella's gitlink does not record yet), rebasing onto
-			// the gitlink alone is a no-op: the same commits come back ready and conflict again,
-			// so every rebuild would be spent without one. Rebase onto what the merger does.
-			// (target is the worker's own gitlink, which already records the change's commits:
-			// the outside commits are measured from the base's gitlink.)
+		branchTipOut, branchErr := gitx.RunGit(ctx, childDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}")
+		branchTip := strings.TrimSpace(branchTipOut)
+		if branchErr == nil && checkRemoteOnto {
+			// The merger sent the change back (or blocked it as rebase_conflict) because its commits
+			// conflict with the child's remote base branch, which it rebases onto. When commits were
+			// pushed there outside the pipeline (a hotfix the umbrella's gitlink does not record yet),
+			// rebasing onto the gitlink alone is a no-op: the same commits come back ready and conflict
+			// again, so every rebuild would be spent without one. Rebase onto what the merger does.
 			// Only a child the change has commits in: one it does not touch keeps its gitlink, so the
 			// rebuild never drags another repository's outside commits (and their checks) into it.
 			baseLink, _ := wtRepo.TreeEntryHash(baseRef, cp)
-			if baseLink != "" && target != baseLink {
+			if baseLink != "" && branchTip != "" && branchTip != baseLink && !isAncestorIn(ctx, childDir, branchTip, baseLink) {
 				if onto := childRemoteOnto(ctx, childDir, d.cfg().Remote, wtRepo.ChildBaseBranch(cp), baseLink); onto != "" {
 					target = onto
 				}
@@ -3079,11 +3169,16 @@ func (d *Dispatcher) refreshPhase(ctx context.Context, item BacklogItem, wt, bra
 			if !reb.ContentConflict {
 				return "", NewBlockedError("rebase_failed", fmt.Sprintf("%s: git rebase %s failed without a conflict:\n%s", cp, target, tailLines(reb.Output, 20)))
 			}
-			msg, err := d.rebuildChild(ctx, change, cp, childDir, branch, target, reb.Output, wasRebuildReq)
-			if err != nil {
-				return "", err
-			}
-			rebuilt = append(rebuilt, msg)
+			reb.Output = tailLines(reb.Output, 40)
+			desc := gitx.DescribeRebaseConflict(ctx, childDir, cp, target, branch, reb)
+			conflicts = append(conflicts, childConflict{
+				cp:           cp,
+				childDir:     childDir,
+				target:       target,
+				reb:          reb,
+				conflictDesc: desc,
+			})
+			conflictDescs = append(conflictDescs, desc)
 		} else {
 			if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", "--detach", target); err != nil {
 				return "", err
@@ -3094,35 +3189,60 @@ func (d *Dispatcher) refreshPhase(ctx context.Context, item BacklogItem, wt, bra
 		}
 	}
 
-	if len(rebuilt) == 0 {
+	if len(conflicts) == 0 {
 		return "", nil
 	}
-	if err := d.reopenTasks(ctx, wt, change); err != nil {
-		return "", err
-	}
-	return strings.Join(rebuilt, "\n"), nil
-}
 
-func (d *Dispatcher) rebuildChild(ctx context.Context, change, cp, childDir, branch, target, conflict string, wasRebuildReq bool) (string, error) {
+	allConflicts := strings.Join(conflictDescs, "\n\n")
 	q, _ := d.store.GetQuarantine(ctx, change)
 	count := 0
 	if q != nil {
 		count = q.Rebuilds
 	}
-	// If store.RequestRebuild already incremented rebuilds, count reflects this rebuild (1..conflict_rebuilds)
 	if wasRebuildReq {
 		if count > d.cfg().ConflictRebuilds || d.cfg().ConflictRebuilds <= 0 {
-			return "", NewBlockedError("rebase_conflict", cp+": "+conflict)
+			return "", NewBlockedError("rebase_conflict", allConflicts)
 		}
 	} else {
-		if count >= d.cfg().ConflictRebuilds {
-			return "", NewBlockedError("rebase_conflict", cp+": "+conflict)
+		if count >= d.cfg().ConflictRebuilds || d.cfg().ConflictRebuilds <= 0 {
+			return "", NewBlockedError("rebase_conflict", allConflicts)
 		}
-		count++
-		_, _ = d.store.RequestRebuild(ctx, change, branch, conflict)
-		_ = d.store.ClearQuarantine(ctx, change, false)
+		count, _ = d.store.RequestRebuildFor(ctx, change, branch, "rebase_conflict", allConflicts)
 	}
 
+	var rebuilt []string
+	for _, c := range conflicts {
+		msg, kept, err := d.rebuildChildBranch(ctx, change, c.cp, c.childDir, branch, c.target, c.reb, c.conflictDesc, count)
+		if err != nil {
+			return "", err
+		}
+		d.logf("dispatcher: %s: %s conflicts with the current base: rebuilding on it (rebuild %d of %d, kept on %s)", change, c.cp, count, d.cfg().ConflictRebuilds, kept)
+		rebuilt = append(rebuilt, msg)
+	}
+
+	if err := d.reopenTasks(ctx, wt, change); err != nil {
+		return "", err
+	}
+	feedback := strings.Join(rebuilt, "\n")
+	_ = d.store.UpdatePendingRebuildDetails(ctx, change, feedback)
+	return feedback, nil
+}
+
+func (d *Dispatcher) hadRebaseConflict(ctx context.Context, change string) bool {
+	if q, err := d.store.GetQuarantine(ctx, change); err == nil && q != nil && q.Reason == "rebase_conflict" {
+		return true
+	}
+	if hist, err := d.store.ListQuarantineHistory(ctx, change, 1); err == nil && len(hist) > 0 && hist[0].Reason == "rebase_conflict" {
+		return true
+	}
+	return false
+}
+
+func keptRebuildFeedback(details string) bool {
+	return strings.Contains(details, ": the previous implementation, kept on branch ")
+}
+
+func (d *Dispatcher) rebuildChildBranch(ctx context.Context, change, cp, childDir, branch, target string, reb gitx.RebaseResult, conflict string, count int) (string, string, error) {
 	number := count
 	for {
 		keptCandidate := fmt.Sprintf("%s-conflict-%d", branch, number)
@@ -3133,9 +3253,15 @@ func (d *Dispatcher) rebuildChild(ctx context.Context, change, cp, childDir, bra
 	}
 	kept := fmt.Sprintf("%s-conflict-%d", branch, number)
 
-	matches := mergeConflictFileRe.FindAllStringSubmatch(conflict, -1)
 	seenF := make(map[string]bool)
 	var files []string
+	for _, f := range reb.ConflictFiles {
+		if f != "" && !seenF[f] {
+			seenF[f] = true
+			files = append(files, f)
+		}
+	}
+	matches := mergeConflictFileRe.FindAllStringSubmatch(conflict, -1)
 	for _, m := range matches {
 		if len(m) == 2 && !seenF[m[1]] {
 			seenF[m[1]] = true
@@ -3144,16 +3270,16 @@ func (d *Dispatcher) rebuildChild(ctx context.Context, change, cp, childDir, bra
 	}
 
 	if _, err := d.childGit(ctx, childDir, cp, "branch", "-f", kept, branch); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", "--detach", target); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if _, err := d.childGit(ctx, childDir, cp, "branch", "-f", branch, target); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if _, err := d.childGit(ctx, childDir, cp, "checkout", "--quiet", branch); err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	_ = d.store.EmitEvent(ctx, store.EventInput{
@@ -3174,7 +3300,7 @@ func (d *Dispatcher) rebuildChild(ctx context.Context, change, cp, childDir, bra
 		"%s: the previous implementation, kept on branch %s of that repository, conflicted with work integrated since%s. "+
 			"Implement the tasks again on the current code: reuse what still applies (git -C %s diff %s %s) and keep what the integrated work changed.",
 		cp, kept, inFiles, cp, target, kept,
-	), nil
+	), kept, nil
 }
 
 // childRemoteOnto returns the commit of the child's <remote>/<baseBranch> when it holds commits

@@ -220,3 +220,62 @@ func TestResetMarkerIsNotMovement(t *testing.T) {
 		t.Fatalf("a stretch holding only markers moved %+v, want nothing", only)
 	}
 }
+
+// TestResolveQuarantineClearResetsRebuildsOfRebaseConflictBlock verifies that clearing a rebase_conflict
+// block without --reset-retries (Forget: false) resets the change's conflict_rebuilds budget, and that
+// UpdatePendingRebuildDetails updates the pending rebuild request's details without incrementing rebuild_num.
+func TestResolveQuarantineClearResetsRebuildsOfRebaseConflictBlock(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	const change = "admin-kpi-revenue-chart"
+	const branch = "feat/spec-" + change
+
+	for i := 1; i <= 3; i++ {
+		n, err := st.RequestRebuild(ctx, change, branch, "conflict details")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != i {
+			t.Fatalf("RequestRebuild #%d returned %d", i, n)
+		}
+		if err := st.UpdatePendingRebuildDetails(ctx, change, "kept on branch "+branch+"-conflict"); err != nil {
+			t.Fatal(err)
+		}
+		q, err := st.GetQuarantine(ctx, change)
+		if err != nil || q == nil || q.Rebuilds != i || q.ConflictDetails != "kept on branch "+branch+"-conflict" {
+			t.Fatalf("after UpdatePendingRebuildDetails #%d: got %+v", i, q)
+		}
+		if err := st.ClearQuarantine(ctx, change, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := st.BlockChange(ctx, QuarantineRecord{
+		ChangeName: change,
+		Reason:     "rebase_conflict",
+		Details:    "repos/dashboard (3 behind, 2 ahead; conflicts in app/services/kpi.rb)",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if q, _ := st.GetQuarantine(ctx, change); q == nil || q.Status != "blocked" || q.Rebuilds != 3 {
+		t.Fatalf("blocked quarantine = %+v, want blocked with 3 rebuilds", q)
+	}
+
+	// Plain clear (BlockCleared, Forget: false): the retries stay, and the conflict_rebuilds budget resets to 0.
+	if err := st.ResolveQuarantine(ctx, change, QuarantineResolution{Resolution: BlockCleared, By: "cli", Forget: false}); err != nil {
+		t.Fatal(err)
+	}
+	q, err := st.GetQuarantine(ctx, change)
+	if err != nil || q == nil {
+		t.Fatalf("GetQuarantine after unblock: %v, %+v", err, q)
+	}
+	if q.Status != "cleared" || q.Rebuilds != 0 {
+		t.Fatalf("after plain unblock of rebase_conflict: status=%q rebuilds=%d, want cleared and 0 rebuilds", q.Status, q.Rebuilds)
+	}
+
+	// The next rebuild request starts at 1 of N again.
+	n, err := st.RequestRebuild(ctx, change, branch, "fresh conflict")
+	if err != nil || n != 1 {
+		t.Fatalf("first RequestRebuild after unblock = (%d, %v), want (1, nil)", n, err)
+	}
+}

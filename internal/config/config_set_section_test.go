@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mayeco/foreman-kit/internal/settings"
+	"github.com/mayeco/foreman-kit/internal/store"
 )
 
 // A pipeline.yaml that lacks a section gets it from config set, with the key, every other line of
@@ -137,5 +139,35 @@ func TestARefusalSaysWhetherItOpensWithAValue(t *testing.T) {
 	}
 	if r := refusedValue("%s is odd", "x").(*Refusal); !r.OpensWithValue || r.Reason != "x is odd" {
 		t.Errorf("refusedValue = %+v", r)
+	}
+}
+
+func TestSetBlockedRetriesWarnsAboutNewlyEligibleBlockedChanges(t *testing.T) {
+	root, _ := setupTestUmbrella(t)
+	st, err := store.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const change = "admin-kpi-revenue-chart"
+	for i := 0; i < 2; i++ {
+		if err := st.BlockChange(ctx, store.QuarantineRecord{ChangeName: change, Reason: "rebase_conflict"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.AdvanceQuarantineRetry(ctx, change); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.BlockChange(ctx, store.QuarantineRecord{ChangeName: change, Reason: "rebase_conflict"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	var out bytes.Buffer
+	if err := Set(root, "pipeline.blocked_changes.retries", "5", false, &out); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "makes admin-kpi-revenue-chart eligible for automatic retry again") {
+		t.Fatalf("expected warning about newly eligible blocked change, got:\n%s", out.String())
 	}
 }

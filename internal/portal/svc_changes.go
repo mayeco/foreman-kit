@@ -352,7 +352,7 @@ func (c *changes) Unblock(ctx context.Context, name string, resetRetries bool) (
 	if err := c.store.ResolveQuarantine(ctx, name, store.QuarantineResolution{By: "portal", Forget: resetRetries}); err != nil {
 		return nil, err
 	}
-	c.hub.BacklogChanged()
+	c.hub.Unblocked()
 	return c.record(ctx, name)
 }
 
@@ -370,7 +370,7 @@ func (c *changes) ApproveRisk(ctx context.Context, name string) (*store.ChangeRe
 	if err := c.store.ApproveChangeRiskBy(ctx, name, "portal"); err != nil {
 		return nil, err
 	}
-	c.hub.BacklogChanged()
+	c.hub.Unblocked()
 	return c.record(ctx, name)
 }
 

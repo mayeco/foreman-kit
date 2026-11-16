@@ -2357,6 +2357,27 @@ func Set(root, key, text string, dryRun bool, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(out, "changed %s\n", changeDesc)
+	if setting.Key == settings.BlockedRetries {
+		if oldN, ok1 := toInt(old); ok1 {
+			if newN, ok2 := toInt(value); ok2 && newN > oldN {
+				if st, err := store.Open(root); err == nil {
+					if blocked, err := st.ListQuarantine(context.Background(), "blocked"); err == nil {
+						var eligible []string
+						for _, b := range blocked {
+							if b.Retries >= oldN && b.Retries < newN {
+								eligible = append(eligible, b.ChangeName)
+							}
+						}
+						if len(eligible) > 0 {
+							fmt.Fprintf(out, "note: raising %s from %d to %d makes %s eligible for automatic retry again once %s has elapsed.\n",
+								setting.Key.Path(), oldN, newN, strings.Join(eligible, ", "), settings.BlockedRetryAfter.Path())
+						}
+					}
+					_ = st.Close()
+				}
+			}
+		}
+	}
 	fmt.Fprintf(out, "takes effect on the next run of %s. Commit and push it before the next cycle: an uncommitted change outside the cycle's write scope pauses the system (git add %s && git commit && git push).\n",
 		setting.ReadBy, relFile)
 	return nil

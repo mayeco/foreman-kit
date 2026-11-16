@@ -723,6 +723,12 @@ func cycleLoop(ctx context.Context, root string, st *store.Store, opts DaemonOpt
 	}
 	var braked, full time.Time // the cycle start for which each brake is already in the log
 	for ctx.Err() == nil {
+		if !time.Now().Before(nextTick) {
+			ticker.Reset(interval)
+			nextTick = time.Now().Add(interval)
+			run(store.CycleTriggerInterval)
+			continue
+		}
 		d := decide()
 		if d.State == advanceNow {
 			fmt.Fprintf(logOut, "[%s] daemon: a worker is free with nothing to start and the last cycle began %s ago (%s: %s): the cycle runs now instead of at %s\n",
@@ -781,6 +787,7 @@ func watchPipelineInputs(ctx context.Context, root string, st *store.Store, ever
 	}
 	cfgSig := configSig()
 	wasPaused := pipelinePaused(ctx, root, st)
+	prevBlocked := blockedInputs(ctx, root, st)
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
@@ -804,7 +811,58 @@ func watchPipelineInputs(ctx context.Context, root string, st *store.Store, ever
 			n.BacklogChanged()
 		}
 		wasPaused = paused
+
+		curBlocked := blockedInputs(ctx, root, st)
+		unblocked := false
+		for chg := range prevBlocked {
+			if _, still := curBlocked[chg]; !still {
+				if st != nil {
+					if state, err := st.ChangeState(ctx, chg); err == nil && (state == store.ChangeIntegrated || state == store.ChangeDiscarded) {
+						continue
+					}
+				}
+				unblocked = true
+				break
+			}
+		}
+		prevBlocked = curBlocked
+		if unblocked {
+			n.ReadyEnqueued()
+			if u, ok := n.(interface{ Unblocked() }); ok {
+				u.Unblocked()
+			} else {
+				n.BacklogChanged()
+			}
+		}
 	}
+}
+
+func blockedInputs(ctx context.Context, root string, st *store.Store) map[string]string {
+	out := make(map[string]string)
+	if st != nil {
+		if list, err := st.ListQuarantine(ctx, "blocked"); err == nil {
+			for _, q := range list {
+				out[q.ChangeName] = q.BlockedAt
+			}
+		}
+	}
+	if matches, err := filepath.Glob(filepath.Join(root, "openspec", "changes", "*", ".needs-human")); err == nil {
+		for _, m := range matches {
+			chg := filepath.Base(filepath.Dir(m))
+			if chg != "" && chg != "archive" {
+				out[chg] += "|q"
+			}
+		}
+	}
+	if matches, err := filepath.Glob(filepath.Join(settings.WorktreesBase(root), "worker-*", "openspec", "changes", "*", ".needs-human")); err == nil {
+		for _, m := range matches {
+			chg := filepath.Base(filepath.Dir(m))
+			if chg != "" && chg != "archive" {
+				out[chg] += "|wtq"
+			}
+		}
+	}
+	return out
 }
 
 // statSignature identifies a file's current content cheaply; it is empty when the file is missing.
@@ -973,7 +1031,13 @@ func StatusDaemon(ctx context.Context, root string, st *store.Store, stdout io.W
 
 // cycleScheduleLine says when the daemon runs its next cycle, as `foreman-kit daemon status` prints it.
 func cycleScheduleLine(sched store.CycleSchedule) string {
-	line := fmt.Sprintf("next cycle at %s at the latest", sched.Latest.UTC().Format(time.RFC3339))
+	latest := sched.Latest
+	if sched.Interval > 0 {
+		for now := time.Now(); !latest.After(now); {
+			latest = latest.Add(sched.Interval)
+		}
+	}
+	line := fmt.Sprintf("next cycle at %s at the latest", latest.UTC().Format(time.RFC3339))
 	if sched.IdleDelay <= 0 {
 		return line
 	}

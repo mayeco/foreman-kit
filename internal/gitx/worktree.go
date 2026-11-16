@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +16,8 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 )
+
+var rebaseConflictFileRe = regexp.MustCompile(`Merge conflict in (\S+)`)
 
 // Fetch fetches from remoteName using go-git in memory (with native SSH resolution),
 // falling back to system git when ProxyJump/ProxyCommand/GIT_SSH_COMMAND or local worktree transport is used.
@@ -225,6 +230,36 @@ func IsWorktreeRoot(ctx context.Context, dir string) bool {
 	return err1 == nil && err2 == nil && os.SameFile(top, want)
 }
 
+// OperationInProgress returns the git operation currently in progress in dir ("rebase", "merge",
+// "cherry-pick", "revert", or "bisect"), or "" when none is in progress.
+func OperationInProgress(ctx context.Context, dir string) string {
+	checks := []struct {
+		gitPath string
+		op      string
+	}{
+		{"rebase-merge", "rebase"},
+		{"rebase-apply", "rebase"},
+		{"MERGE_HEAD", "merge"},
+		{"CHERRY_PICK_HEAD", "cherry-pick"},
+		{"REVERT_HEAD", "revert"},
+		{"BISECT_LOG", "bisect"},
+	}
+	for _, c := range checks {
+		out, err := RunGit(ctx, dir, "rev-parse", "--git-path", c.gitPath)
+		if err != nil {
+			continue
+		}
+		p := strings.TrimSpace(out)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(dir, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return c.op
+		}
+	}
+	return ""
+}
+
 // AbortInterruptedRebase aborts a rebase left in progress in dir (for example when git was killed
 // mid-rebase) and reports whether one was found.
 func AbortInterruptedRebase(ctx context.Context, dir string) bool {
@@ -253,6 +288,8 @@ type RebaseResult struct {
 	OK              bool
 	ContentConflict bool
 	Output          string
+	ConflictFiles   []string
+	ConflictDiff    string
 }
 
 // rebaseCleanupTimeout bounds the "rebase --abort" that RebaseBranch runs after a failed rebase.
@@ -273,18 +310,136 @@ func RebaseBranch(ctx context.Context, dir, ontoRef string) RebaseResult {
 		_, _ = RunGit(cleanupCtx, dir, "rebase", "--abort")
 		return RebaseResult{OK: false, Output: out}
 	}
-	conflict := strings.Contains(out, "CONFLICT (") || strings.Contains(out, "error: could not apply")
-	if !conflict {
-		if unmerged, uErr := RunGit(cleanupCtx, dir, "diff", "--name-only", "--diff-filter=U"); uErr == nil && strings.TrimSpace(unmerged) != "" {
-			conflict = true
+	seenFiles := make(map[string]bool)
+	var files []string
+	addFile := func(f string) {
+		f = strings.TrimSpace(f)
+		if f != "" && !seenFiles[f] {
+			seenFiles[f] = true
+			files = append(files, f)
+		}
+	}
+	for _, m := range rebaseConflictFileRe.FindAllStringSubmatch(out, -1) {
+		if len(m) == 2 {
+			addFile(m[1])
+		}
+	}
+	if unmerged, uErr := RunGit(cleanupCtx, dir, "diff", "--name-only", "--diff-filter=U"); uErr == nil {
+		for _, line := range strings.Split(strings.TrimSpace(unmerged), "\n") {
+			addFile(line)
+		}
+	}
+	conflict := strings.Contains(out, "CONFLICT (") || strings.Contains(out, "error: could not apply") || len(files) > 0
+	var conflictDiff string
+	if conflict {
+		if dOut, dErr := RunGit(cleanupCtx, dir, "diff"); dErr == nil {
+			conflictDiff = strings.TrimSpace(dOut)
+			if len(conflictDiff) > 4000 {
+				conflictDiff = conflictDiff[:4000] + "\n... (truncated)"
+			}
 		}
 	}
 	_, _ = RunGit(cleanupCtx, dir, "rebase", "--abort")
+	sort.Strings(files)
 	return RebaseResult{
 		OK:              false,
 		ContentConflict: conflict,
 		Output:          out,
+		ConflictFiles:   files,
+		ConflictDiff:    conflictDiff,
 	}
+}
+
+// DescribeRebaseConflict formats a structured rebase conflict summary naming the repository, how
+// many commits it is behind ontoRef and ahead on headRef, and the list of conflicting files, followed
+// by the git rebase output.
+func DescribeRebaseConflict(ctx context.Context, dir, repoPath, ontoRef, headRef string, reb RebaseResult) string {
+	seen := make(map[string]bool)
+	var files []string
+	addFile := func(f string) {
+		f = strings.TrimSpace(f)
+		if f != "" && !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	for _, f := range reb.ConflictFiles {
+		addFile(f)
+	}
+	for _, m := range rebaseConflictFileRe.FindAllStringSubmatch(reb.Output, -1) {
+		if len(m) == 2 {
+			addFile(m[1])
+		}
+	}
+	if ontoRef != "" && headRef != "" {
+		if ver, _, err := Version(ctx); err == nil && VersionAtLeast(ver, "2.38") {
+			if mtOut, mtErr := RunGit(ctx, dir, "merge-tree", "--write-tree", "--name-only", ontoRef, headRef); mtErr != nil && mtOut != "" {
+				lines := strings.Split(strings.TrimSpace(mtOut), "\n")
+				for i, line := range lines {
+					line = strings.TrimSpace(line)
+					if i == 0 && len(line) >= 40 && !strings.ContainsAny(line, " 	/") {
+						continue
+					}
+					if line == "" {
+						break
+					}
+					if strings.HasPrefix(line, "CONFLICT (") || strings.HasPrefix(line, "Auto-merging ") {
+						continue
+					}
+					addFile(line)
+				}
+			}
+		}
+	}
+	sort.Strings(files)
+
+	behind, ahead := 0, 0
+	haveCounts := false
+	if ontoRef != "" && headRef != "" {
+		if cntOut, err := RunGit(ctx, dir, "rev-list", "--left-right", "--count", ontoRef+"..."+headRef); err == nil {
+			fields := strings.Fields(strings.TrimSpace(cntOut))
+			if len(fields) == 2 {
+				b, err1 := strconv.Atoi(fields[0])
+				a, err2 := strconv.Atoi(fields[1])
+				if err1 == nil && err2 == nil {
+					behind, ahead = b, a
+					haveCounts = true
+				}
+			}
+		}
+	}
+
+	var meta []string
+	if haveCounts {
+		meta = append(meta, fmt.Sprintf("%d behind, %d ahead", behind, ahead))
+	}
+	if len(files) > 0 {
+		meta = append(meta, "conflicts in "+strings.Join(files, ", "))
+	}
+	header := repoPath
+	if len(meta) > 0 {
+		header = fmt.Sprintf("%s (%s)", repoPath, strings.Join(meta, "; "))
+	}
+	var sections []string
+	sections = append(sections, header)
+	if out := strings.TrimSpace(reb.Output); out != "" {
+		sections = append(sections, out)
+	}
+	if len(files) > 0 && ontoRef != "" && headRef != "" {
+		args := []string{"log", "--oneline", "-n", "10", headRef + ".." + ontoRef, "--"}
+		args = append(args, files...)
+		if logOut, err := RunGit(ctx, dir, args...); err == nil && strings.TrimSpace(logOut) != "" {
+			var indented []string
+			for _, l := range strings.Split(strings.TrimSpace(logOut), "\n") {
+				indented = append(indented, "  "+strings.TrimSpace(l))
+			}
+			sections = append(sections, fmt.Sprintf("Conflicting commits on %s:\n%s", ontoRef, strings.Join(indented, "\n")))
+		}
+	}
+	if diff := strings.TrimSpace(reb.ConflictDiff); diff != "" {
+		sections = append(sections, "Conflict markers:\n"+diff)
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 // StatusPorcelain returns git status --porcelain output for dir without acquiring optional index.lock.

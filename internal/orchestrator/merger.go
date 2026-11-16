@@ -1404,8 +1404,9 @@ func (m *Merger) rebaseChild(ctx context.Context, manifest store.ReadyManifest, 
 		if !reb.ContentConflict {
 			return "", "", NewBlockedError("rebase_failed", fmt.Sprintf("%s: %s", cp, tailLines(reb.Output, 40)))
 		}
+		reb.Output = tailLines(reb.Output, 40)
+		conflictMsg := gitx.DescribeRebaseConflict(ctx, childDir, cp, childBaseRef, workerSHA, reb)
 		if m.rebuildAllowed(ctx, manifest.ChangeName) {
-			conflictMsg := fmt.Sprintf("%s: %s", cp, tailLines(reb.Output, 40))
 			// Use Case 5 (internal/llm): Synthesize RebaseConflictBrief for {{rebuild}} prompt via zendev-sh/goai
 			if m.llmClient != nil && m.llmClient.Available() {
 				if brief, err := m.llmClient.SummarizeRebaseConflict(ctx, manifest.ChangeName, cp, reb.Output); err == nil && brief != nil {
@@ -1414,7 +1415,7 @@ func (m *Merger) rebaseChild(ctx context.Context, manifest store.ReadyManifest, 
 			}
 			return "", "", &sendBackError{msg: conflictMsg}
 		}
-		return "", "", NewBlockedError("rebase_conflict", fmt.Sprintf("%s: %s", cp, tailLines(reb.Output, 40)))
+		return "", "", NewBlockedError("rebase_conflict", conflictMsg)
 	}
 
 	rebased, err = childRepo.RevParse("HEAD")

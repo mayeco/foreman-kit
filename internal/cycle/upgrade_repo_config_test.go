@@ -239,3 +239,66 @@ func TestNothingStartsOnARepoConfigOfAnOlderKit(t *testing.T) {
 		t.Errorf("status does not say it:\n%s", out.String())
 	}
 }
+
+func TestUpgradeSucceedsWhenSubmoduleCheckoutLagsRecordedGitlink(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	childBare := filepath.Join(tmp, "web.git")
+	appDir := filepath.Join(tmp, "app")
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := gitx.RunGit(ctx, dir, args...)
+		if err != nil {
+			t.Fatalf("git %v in %s: %v", args, dir, err)
+		}
+		return strings.TrimSpace(out)
+	}
+	if err := os.MkdirAll(childBare, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(childBare, "init", "--bare", "-q", "-b", "main")
+
+	seed := filepath.Join(tmp, "seed")
+	if err := os.MkdirAll(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(seed, "init", "-q", "-b", "main")
+	git(seed, "config", "user.email", "test@example.com")
+	git(seed, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(seed, config.RepoConfigFile), []byte("base_branch: main\nkind: cli\ngates:\n  test: \"true\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(seed, "add", "-A")
+	git(seed, "commit", "-qm", "c1")
+	c1 := git(seed, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(seed, "file.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(seed, "add", "-A")
+	git(seed, "commit", "-qm", "c2")
+	c2 := git(seed, "rev-parse", "HEAD")
+	git(seed, "remote", "add", "origin", childBare)
+	git(seed, "push", "-q", "origin", "main")
+
+	if err := Init(ctx, appDir, KitOptions{Agents: "claude", Version: "8.0.0-test"}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	git(appDir, "init", "-q", "-b", "main")
+	git(appDir, "config", "user.email", "test@example.com")
+	git(appDir, "config", "user.name", "Test")
+	git(appDir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", childBare, "repos/web")
+	git(appDir, "add", "-A")
+	git(appDir, "commit", "-qm", "initial umbrella with submodule at c2")
+
+	// Move the local submodule checkout back to c1 so git status --ignore-submodules=dirty would report `M repos/web (new commits)`.
+	childCheckout := filepath.Join(appDir, "repos", "web")
+	git(childCheckout, "checkout", "-q", c1)
+
+	var out bytes.Buffer
+	if err := Upgrade(ctx, appDir, KitOptions{Version: "9.0.0-test"}, &out); err != nil {
+		t.Fatalf("Upgrade failed when submodule checkout lagged recorded gitlink: %v\n%s", err, out.String())
+	}
+	if got := git(childCheckout, "rev-parse", "HEAD"); got != c2 {
+		t.Fatalf("expected clean lagging submodule checkout to be synced to recorded gitlink %s, got %s", c2, got)
+	}
+}

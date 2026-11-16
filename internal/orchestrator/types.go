@@ -478,6 +478,7 @@ type RunningDispatchInfo struct {
 	PID       int               `json:"pid"`
 	StartedAt string            `json:"started_at,omitempty"`
 	Workers   int               `json:"workers"`
+	Mode      string            `json:"mode,omitempty"`
 	Results   map[string]string `json:"results"`
 }
 

@@ -157,15 +157,16 @@ func (q *quarantineState) retries() int {
 	return 0
 }
 
-// rebuilds is how many rebuilds the merger asked for since the counters started over, or since the
-// change was retried after it ran out of them (a rebase_conflict block the dispatcher retried).
+// rebuilds is how many rebuilds the merger or the dispatcher asked for since the counters started
+// over, or since the change was retried or unblocked after it ran out of them (a rebase_conflict
+// block that was resolved).
 func (q *quarantineState) rebuilds() int {
 	r := q.latestRequest()
 	if r == nil {
 		return 0
 	}
 	for _, b := range q.chain {
-		if b.resolution == BlockAutoRetry && b.reason == "rebase_conflict" && b.resolvedAt > r.requestedAt {
+		if (b.resolution == BlockAutoRetry || b.resolution == BlockCleared) && b.reason == "rebase_conflict" && b.resolvedAt > r.requestedAt {
 			return 0
 		}
 	}
@@ -528,6 +529,20 @@ func (s *Store) RequestRebuildFor(ctx context.Context, change, branch, reason, c
 		return err
 	})
 	return n, err
+}
+
+// UpdatePendingRebuildDetails replaces conflict_details on the pending rebuild request of change
+// without consuming it or incrementing rebuild_num.
+func (s *Store) UpdatePendingRebuildDetails(ctx context.Context, change, conflictDetails string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE rebuild_requests SET conflict_details = ?
+		WHERE id = (
+			SELECT id FROM rebuild_requests
+			WHERE change_name = ? AND consumed_at IS NULL
+			ORDER BY id DESC LIMIT 1
+		)
+	`, nullStr(conflictDetails), change)
+	return err
 }
 
 // ApproveChangeRisk records that an operator accepts the risk a change was held for.

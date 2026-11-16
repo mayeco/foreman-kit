@@ -88,11 +88,12 @@ func TestCyclePromptContinuousDispatchFlag(t *testing.T) {
 }
 
 type countingNotifier struct {
-	ready, backlog atomic.Int32
+	ready, backlog, unblocked atomic.Int32
 }
 
 func (n *countingNotifier) ReadyEnqueued()  { n.ready.Add(1) }
 func (n *countingNotifier) BacklogChanged() { n.backlog.Add(1) }
+func (n *countingNotifier) Unblocked()      { n.unblocked.Add(1); n.backlog.Add(1) }
 
 func waitFor(timeout time.Duration, cond func() bool) bool {
 	deadline := time.Now().Add(timeout)
@@ -157,8 +158,121 @@ func TestWatchPipelineInputsSignalsBacklogEditsAndResume(t *testing.T) {
 		t.Fatal("expected a resume to wake the merger")
 	}
 
+	// Blocking and then unblocking a change via the CLI wakes both the dispatcher (via Unblocked) and the merger.
+	if err := st.BlockChange(ctx, store.QuarantineRecord{ChangeName: "cli-unblocked", Reason: "rebase_conflict"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(60 * time.Millisecond)
+	beforeUnblock := n.unblocked.Load()
+	beforeReady := n.ready.Load()
+	if err := st.ResolveQuarantine(ctx, "cli-unblocked", store.QuarantineResolution{Resolution: store.BlockUnblocked, By: "cli"}); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(time.Second, func() bool { return n.unblocked.Load() > beforeUnblock && n.ready.Load() > beforeReady }) {
+		t.Fatalf("expected CLI unblock to wake dispatcher (unblocked=%d->%d) and merger (ready=%d->%d)",
+			beforeUnblock, n.unblocked.Load(), beforeReady, n.ready.Load())
+	}
+
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("watcher returned %v", err)
+	}
+}
+
+func TestCycleScheduleLineAdvancesPastTimestamp(t *testing.T) {
+	past := time.Now().UTC().Add(-70 * time.Minute)
+	sched := store.CycleSchedule{
+		Interval: time.Hour,
+		Latest:   past,
+	}
+	line := cycleScheduleLine(sched)
+	wantLatest := past.Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	if !strings.Contains(line, wantLatest) {
+		t.Fatalf("cycleScheduleLine(%+v) = %q, want future timestamp %s", sched, line, wantLatest)
+	}
+}
+
+func TestStatusAndProgressSurfaceRebaseConflictSummaryAndStalledWorkers(t *testing.T) {
+	root := bareApp(t)
+	st, err := store.OpenAt(filepath.Join(root, "log", "openspec.db"), "ws-stalled", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+
+	const blocker = "admin-kpi-revenue-chart"
+	details := "repos/dashboard (3 behind, 2 ahead; conflicts in app/services/kpi.rb)\n\nConflicting commits on origin/master:\n  1111111 fix kpi\n"
+	if err := st.BlockChange(ctx, store.QuarantineRecord{
+		ChangeName: blocker,
+		Reason:     "rebase_conflict",
+		Details:    details,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	backlog := []map[string]any{
+		{"change_name": blocker, "priority": 1, "description": "KPI chart"},
+		{"change_name": "export-kpi-csv", "priority": 2, "description": "Export KPI", "depends_on": []any{blocker}},
+		{"change_name": "kpi-alerts", "priority": 3, "description": "KPI alerts", "depends_on": []any{"export-kpi-csv"}},
+	}
+	if err := WriteJSONList(filepath.Join(root, filepath.FromSlash(BacklogFile)), backlog); err != nil {
+		t.Fatal(err)
+	}
+
+	var statusOut strings.Builder
+	if err := Status(ctx, root, st, &statusOut); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"repos/dashboard (3 behind, 2 ahead; conflicts in app/services/kpi.rb)",
+		"STALLED: all workers idle, 2 item(s) waiting on blocked admin-kpi-revenue-chart",
+	} {
+		if !strings.Contains(statusOut.String(), want) {
+			t.Fatalf("expected %q in Status output, got:\n%s", want, statusOut.String())
+		}
+	}
+
+	rep, err := Progress(ctx, root, st, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	txt := FormatProgressText(rep)
+	for _, want := range []string{
+		"stalled: all workers idle, 2 item(s) waiting on blocked admin-kpi-revenue-chart",
+		"admin-kpi-revenue-chart is blocked (rebase_conflict;",
+		"repos/dashboard (3 behind, 2 ahead; conflicts in app/services/kpi.rb)",
+	} {
+		if !strings.Contains(txt, want) {
+			t.Fatalf("expected %q in FormatProgressText output, got:\n%s", want, txt)
+		}
+	}
+}
+
+func TestSelfUpgradeFromNPMAndExplicitVersion(t *testing.T) {
+	ctx := context.Background()
+	var installedPkg string
+	var out strings.Builder
+	err := SelfUpgrade(ctx, SelfUpgradeOptions{
+		SourceDir: filepath.Join(t.TempDir(), "no-local-source"),
+		Version:   "v9.9.9",
+		NPMViewFunc: func(ctx context.Context, pkgSpec string) (string, error) {
+			if pkgSpec != "@mayeco/foreman-kit@9.9.9" {
+				t.Fatalf("unexpected pkgSpec %q", pkgSpec)
+			}
+			return "9.9.9", nil
+		},
+		NPMInstallFunc: func(ctx context.Context, pkgSpec string) error {
+			installedPkg = pkgSpec
+			return nil
+		},
+	}, &out)
+	if err != nil {
+		t.Fatalf("SelfUpgrade failed: %v", err)
+	}
+	if installedPkg != "@mayeco/foreman-kit@9.9.9" {
+		t.Fatalf("installedPkg = %q, want @mayeco/foreman-kit@9.9.9", installedPkg)
+	}
+	if !strings.Contains(out.String(), "self-upgrade: updated @mayeco/foreman-kit to v9.9.9") {
+		t.Fatalf("unexpected SelfUpgrade output:\n%s", out.String())
 	}
 }

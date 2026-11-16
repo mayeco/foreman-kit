@@ -22,9 +22,10 @@ type Hub struct {
 	backlog    chan struct{} // the backlog was edited, a change integrated, a worker freed a slot, a quarantine cleared
 	dispatched chan struct{} // a pass of the continuous dispatcher ended, or that dispatcher stopped
 
-	loadMu  sync.Mutex
-	load    DispatchLoad
-	hasLoad bool
+	loadMu     sync.Mutex
+	load       DispatchLoad
+	hasLoad    bool
+	wakeReason string
 }
 
 // DispatchLoad is what a pass of the continuous dispatcher left once it had started every backlog item
@@ -72,8 +73,38 @@ func (h *Hub) ReadyEnqueued() {
 // BacklogChanged wakes the dispatcher: the set of eligible backlog items may have changed.
 func (h *Hub) BacklogChanged() {
 	if h != nil {
+		h.loadMu.Lock()
+		if h.wakeReason == "" {
+			h.wakeReason = "backlog"
+		}
+		h.loadMu.Unlock()
 		notify(h.backlog)
 	}
+}
+
+// Unblocked wakes the dispatcher with the reason "unblock": a change's quarantine or question was lifted.
+func (h *Hub) Unblocked() {
+	if h != nil {
+		h.loadMu.Lock()
+		h.wakeReason = "unblock"
+		h.loadMu.Unlock()
+		notify(h.backlog)
+	}
+}
+
+// TakeWakeReason returns the reason of the pending dispatcher wake-up ("backlog" or "unblock") and resets it.
+func (h *Hub) TakeWakeReason() string {
+	if h == nil {
+		return "backlog"
+	}
+	h.loadMu.Lock()
+	defer h.loadMu.Unlock()
+	r := h.wakeReason
+	h.wakeReason = ""
+	if r == "" {
+		return "backlog"
+	}
+	return r
 }
 
 // DispatchPassed records what a pass of the continuous dispatcher left and wakes the cycle loop.

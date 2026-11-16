@@ -198,9 +198,12 @@ type KitOptions struct {
 
 // SelfUpgradeOptions configures SelfUpgrade.
 type SelfUpgradeOptions struct {
-	SourceDir  string
-	BinaryPath string
-	BuildFunc  func(ctx context.Context, sourceDir, destBin string) error
+	SourceDir      string
+	Version        string
+	BinaryPath     string
+	BuildFunc      func(ctx context.Context, sourceDir, destBin string) error
+	NPMViewFunc    func(ctx context.Context, pkgSpec string) (string, error)
+	NPMInstallFunc func(ctx context.Context, pkgSpec string) error
 }
 
 // ParseAgentsList parses a comma-separated list of agent names and validates against SupportedAgents.
@@ -739,7 +742,8 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 	isGitEarly := isGitRepoWithHead(ctx, target)
 	if foremanLayoutPending(target) {
 		if isGitEarly {
-			if dirty, err := gitx.RunGit(ctx, target, "status", "--porcelain", "--ignore-submodules=dirty"); err == nil && strings.TrimSpace(dirty) != "" && !opts.Force {
+			syncLaggingCleanSubmodules(ctx, target)
+			if dirty, err := gitx.RunGit(ctx, target, "status", "--porcelain", "--ignore-submodules=all"); err == nil && strings.TrimSpace(dirty) != "" && !opts.Force {
 				return fmt.Errorf("%s has uncommitted changes; commit or stash them first", target)
 			}
 			earlyVer := opts.Version
@@ -882,9 +886,10 @@ func Upgrade(ctx context.Context, target string, opts KitOptions, out io.Writer)
 		}
 	}
 	if isGit {
+		syncLaggingCleanSubmodules(ctx, target)
 		// What a repository holds uncommitted is its own: an upgrade writes there only the
 		// repo.config.yaml it rewrites, which is committed in that repository.
-		if dirty, err := gitx.RunGit(ctx, target, "status", "--porcelain", "--ignore-submodules=dirty"); err == nil && strings.TrimSpace(dirty) != "" && !opts.Force && len(movedLayout) == 0 {
+		if dirty, err := gitx.RunGit(ctx, target, "status", "--porcelain", "--ignore-submodules=all"); err == nil && strings.TrimSpace(dirty) != "" && !opts.Force && len(movedLayout) == 0 {
 			return fmt.Errorf("%s has uncommitted changes; commit or stash them first", target)
 		}
 		if _, err := gitx.RunGit(ctx, target, "checkout", "-q", "-B", branch); err != nil {
@@ -1278,9 +1283,16 @@ func SelfUpgrade(ctx context.Context, opts SelfUpgradeOptions, out io.Writer) er
 	if srcDir == "" {
 		srcDir = resolveSelfUpgradeSourceDir("")
 	}
+	builtVer := assets.Version
 	buildFn := opts.BuildFunc
 	if buildFn == nil && srcDir != "" && fileExists(filepath.Join(srcDir, "go.mod")) {
 		buildFn = func(ctx context.Context, sourceDir, destBin string) error {
+			if ref := strings.TrimSpace(opts.Version); ref != "" {
+				if dirty, err := gitx.RunGit(ctx, sourceDir, "status", "--porcelain", "--ignore-submodules=all"); err == nil && strings.TrimSpace(dirty) == "" {
+					_, _ = gitx.RunGit(ctx, sourceDir, "fetch", "--tags", "--quiet", "origin")
+					_, _ = gitx.RunGit(ctx, sourceDir, "checkout", "--quiet", ref)
+				}
+			}
 			ver := assets.Version
 			sha := assets.SourceCommit
 			// The version of the source being built, detected from its git tags.
@@ -1288,9 +1300,10 @@ func SelfUpgrade(ctx context.Context, opts SelfUpgradeOptions, out io.Writer) er
 				vcmd := exec.CommandContext(ctx, "sh", script)
 				vcmd.Dir = sourceDir
 				if vOut, err := vcmd.Output(); err == nil && strings.TrimSpace(string(vOut)) != "" {
-					ver = strings.TrimSpace(string(vOut))
+					ver = strings.TrimPrefix(strings.TrimSpace(string(vOut)), "v")
 				}
 			}
+			builtVer = ver
 			if sOut, err := gitx.RunGit(ctx, sourceDir, "rev-parse", "--short=12", "HEAD"); err == nil && strings.TrimSpace(sOut) != "" {
 				sha = strings.TrimSpace(sOut)
 			}
@@ -1318,11 +1331,85 @@ func SelfUpgrade(ctx context.Context, opts SelfUpgradeOptions, out io.Writer) er
 		if err := buildFn(ctx, srcDir, destBin); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "self-upgrade: updated %s to v%s\n", destBin, assets.Version)
+		fmt.Fprintf(out, "self-upgrade: updated %s to v%s\n", destBin, strings.TrimPrefix(builtVer, "v"))
 		return nil
 	}
+
+	viewFn := opts.NPMViewFunc
+	if viewFn == nil {
+		viewFn = func(ctx context.Context, pkgSpec string) (string, error) {
+			cmd := exec.CommandContext(ctx, "npm", "view", pkgSpec, "version")
+			outBytes, err := cmd.Output()
+			return strings.TrimSpace(string(outBytes)), err
+		}
+	}
+	installFn := opts.NPMInstallFunc
+	if installFn == nil {
+		installFn = func(ctx context.Context, pkgSpec string) error {
+			cmd := exec.CommandContext(ctx, "npm", "install", "-g", pkgSpec)
+			bOut, err := cmd.CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("npm install -g %s failed: %w (%s)", pkgSpec, err, strings.TrimSpace(string(bOut)))
+			}
+			return nil
+		}
+	}
+
+	spec := strings.TrimPrefix(strings.TrimSpace(opts.Version), "v")
+	if spec == "" {
+		spec = "latest"
+	}
+	pkgSpec := "@mayeco/foreman-kit@" + spec
+	if npmVer, err := viewFn(ctx, pkgSpec); err == nil && npmVer != "" {
+		npmVer = strings.TrimPrefix(npmVer, "v")
+		curVer := strings.TrimPrefix(assets.Version, "v")
+		if npmVer != curVer {
+			if err := installFn(ctx, "@mayeco/foreman-kit@"+npmVer); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "self-upgrade: updated @mayeco/foreman-kit to v%s\n", npmVer)
+			return nil
+		}
+	} else if err != nil && strings.TrimSpace(opts.Version) != "" {
+		return fmt.Errorf("cannot resolve %s on npm: %w", pkgSpec, err)
+	}
+
 	fmt.Fprintf(out, "self-upgrade: foreman-kit v%s (%s) is up to date\n", assets.Version, assets.SourceCommit)
 	return nil
+}
+
+func syncLaggingCleanSubmodules(ctx context.Context, target string) {
+	repo, err := gitx.Open(target)
+	if err != nil {
+		return
+	}
+	children, _ := repo.ChildPaths()
+	for _, cp := range children {
+		_, _ = gitx.RunGit(ctx, target, "reset", "--quiet", "HEAD", "--", cp)
+		childDir := filepath.Join(target, filepath.FromSlash(cp))
+		if !exists(filepath.Join(childDir, ".git")) {
+			continue
+		}
+		dirty, err := gitx.StatusPorcelain(ctx, childDir, true)
+		if err != nil || strings.TrimSpace(dirty) != "" {
+			continue
+		}
+		recorded, err := repo.TreeEntryHash("HEAD", cp)
+		if err != nil || recorded == "" {
+			continue
+		}
+		headOut, err := gitx.RunGit(ctx, childDir, "rev-parse", "HEAD")
+		if err != nil {
+			continue
+		}
+		childHead := strings.TrimSpace(headOut)
+		if childHead == "" || childHead == recorded {
+			continue
+		}
+		if _, err := gitx.RunGit(ctx, childDir, "merge-base", "--is-ancestor", childHead, recorded); err == nil {
+			_, _ = gitx.SubmoduleUpdateInit(ctx, target, "--quiet", "--", cp)
+		}
+	}
 }
 
 // RepoDetection holds auto-detected stack, kind, commands, and pins for a child repository.
@@ -2260,10 +2347,14 @@ func RunKitCLI(ctx context.Context, defaultTarget string, args []string, stdout,
 		}
 		return 0
 	case "self-upgrade":
-		if sourceFlag == "" && len(positional) > 1 && dirExists(target) && fileExists(filepath.Join(target, "cmd", "foreman-kit", "main.go")) {
-			sourceFlag = target
+		if sourceFlag == "" && len(positional) > 1 {
+			if dirExists(target) && fileExists(filepath.Join(target, "cmd", "foreman-kit", "main.go")) {
+				sourceFlag = target
+			} else if opts.Version == "" {
+				opts.Version = strings.TrimSpace(positional[1])
+			}
 		}
-		if err := SelfUpgrade(ctx, SelfUpgradeOptions{SourceDir: sourceFlag}, stdout); err != nil {
+		if err := SelfUpgrade(ctx, SelfUpgradeOptions{SourceDir: sourceFlag, Version: opts.Version}, stdout); err != nil {
 			fmt.Fprintf(stderr, "kit: %v\n", err)
 			return 1
 		}

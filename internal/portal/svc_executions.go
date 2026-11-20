@@ -437,13 +437,18 @@ func (x *executions) startAgent(ctx context.Context, in AgentRun) (store.Executi
 	if err := x.store.CreateExecution(ctx, ex); err != nil {
 		return store.Execution{}, err
 	}
+	// Read before the work starts: a run that ends at once would otherwise answer as finished.
+	created, err := x.created(ctx, ex)
+	if err != nil {
+		return store.Execution{}, err
+	}
 	x.launch(id, func(runCtx context.Context) (string, int) {
 		// The agent runs under this execution: each try of each engine is then an attempt of it, and
 		// an agent that goes idle shows on its page like one of a worker does.
 		out, code, err := x.kit.RunAgent(store.WithExecution(runCtx, id), workdir, engines, prompt)
 		return failureNote(runCtx, out, code, "the agent", err)
 	})
-	return x.created(ctx, ex)
+	return created, nil
 }
 
 // StartOperation starts an operation of the kit in the background and returns the execution it
@@ -481,12 +486,17 @@ func (x *executions) StartOperation(ctx context.Context, operation, change strin
 	if err := x.store.CreateExecution(ctx, ex); err != nil {
 		return store.Execution{}, err
 	}
+	// Read before the work starts: an operation that ends at once would otherwise answer as finished.
+	created, err := x.created(ctx, ex)
+	if err != nil {
+		return store.Execution{}, err
+	}
 	x.launch(id, func(runCtx context.Context) (string, int) {
 		// The operation runs under this execution: its output is recorded while it runs.
 		out, code, err := x.kit.RunOperation(store.WithExecution(runCtx, id), dir, name)
 		return failureNote(runCtx, out, code, name, err)
 	})
-	return x.created(ctx, ex)
+	return created, nil
 }
 
 // failureNote returns the output and the exit code of work the kit ran, with the reason the kit gave

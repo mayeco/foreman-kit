@@ -715,17 +715,24 @@ func ensureOpenSpecInit(ctx context.Context, target string, agents []string) err
 		return fmt.Errorf("openspec is not installed. Install it, then run this again:\n%s", openspecInstallHelp)
 	}
 	tools := strings.Join(config.Tools(agents), ",")
-	cmd := exec.CommandContext(ctx, "openspec", "init", "--tools", tools, "--no-animation", "--no-copilot-cloud", ".")
-	cmd.Dir = target
-	if err := cmd.Run(); err != nil {
-		// An openspec from before those two options.
-		cmdFallback := exec.CommandContext(ctx, "openspec", "init", "--tools", tools, ".")
-		cmdFallback.Dir = target
-		if said, err := cmdFallback.CombinedOutput(); err != nil {
-			return fmt.Errorf("openspec init failed in %s: %v\n%s", target, err, strings.TrimSpace(string(said)))
+	// openspec 2.x puts its skills in ~/.agents/skills unless told otherwise: --scope project keeps
+	// them in the application, beside the kit's. Each later form is an openspec from before the
+	// options the one above it adds (--scope, then --no-animation and --no-copilot-cloud).
+	attempts := [][]string{
+		{"init", "--tools", tools, "--scope", "project", "--no-animation", "--no-copilot-cloud", "."},
+		{"init", "--tools", tools, "--no-animation", "--no-copilot-cloud", "."},
+		{"init", "--tools", tools, "."},
+	}
+	var said []byte
+	var err error
+	for _, args := range attempts {
+		cmd := exec.CommandContext(ctx, "openspec", args...)
+		cmd.Dir = target
+		if said, err = cmd.CombinedOutput(); err == nil {
+			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("openspec init failed in %s: %v\n%s", target, err, strings.TrimSpace(string(said)))
 }
 
 // Upgrade upgrades an existing kit installation in target from embedded assets.
